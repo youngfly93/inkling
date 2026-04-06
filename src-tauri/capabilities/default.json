@@ -1,0 +1,30 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for all windows",
+  "windows": ["*"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-create",
+    "core:window:allow-close",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "core:window:allow-destroy",
+    "opener:default",
+    "store:default",
+    "sql:default",
+    "sql:allow-execute",
+    "sql:allow-select",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        { "name": "selection-bridge", "sidecar": true }
+      ]
+    },
+    "shell:allow-open"
+  ]
+}
