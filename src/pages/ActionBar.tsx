@@ -17,14 +17,14 @@ import {
   ArrowUpRight,
   Sparkles,
 } from "lucide-react";
-import { motion, useMotionValue, useSpring, useTransform, type MotionValue } from "motion/react";
+import { AnimatePresence, motion, useMotionValue, useSpring, useTransform, type MotionValue } from "motion/react";
 import { saveSentence as dbSave, saveTransform } from "../services/db";
 
-const DOCK_SIZE = 38;
-const DOCK_MAGNIFICATION = 58;
-const DOCK_DISTANCE = 110;
-const DOCK_WINDOW_WIDTH = 472;
-const DOCK_WINDOW_HEIGHT = 124;
+const DOCK_SIZE = 36;
+const DOCK_MAGNIFICATION = 62;
+const DOCK_DISTANCE = 150;
+const DOCK_WINDOW_WIDTH = 420;
+const DOCK_WINDOW_HEIGHT = 106;
 const PANEL_WINDOW_WIDTH = 576;
 const WINDOW_SHADOW_BLEED_X = 18;
 const WINDOW_SHADOW_BLEED_Y = 20;
@@ -35,6 +35,13 @@ interface Selection {
   appName?: string;
   url: string;
   editable: boolean;
+  mouseX?: number;
+  mouseY?: number;
+}
+
+interface CursorPosition {
+  x: number;
+  y: number;
 }
 
 interface DockAction {
@@ -65,6 +72,8 @@ export default function ActionBar() {
   const [resultKind, setResultKind] = useState<ResultKind>("rewrite");
   const [showSelectedText, setShowSelectedText] = useState(false);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const dockRef = useRef<HTMLDivElement | null>(null);
+  const dockItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const lastMeasuredWindowSize = useRef<{ width: number; height: number } | null>(null);
   const mouseX = useMotionValue(Infinity);
@@ -83,7 +92,10 @@ export default function ActionBar() {
     root?.classList.add("actionbar-window");
 
     invoke<Selection>("get_current_selection")
-      .then(setSel)
+      .then((selection) => {
+        setSel(selection);
+        void syncDockHoverFromSelection(selection);
+      })
       .catch((e) => console.error("Failed to get selection:", e));
 
     // Listen for selection updates when window is reused
@@ -103,8 +115,8 @@ export default function ActionBar() {
       setResultCanReplace(false);
       setResultKind("rewrite");
       setShowSelectedText(false);
-      mouseX.set(Infinity);
-      void resizeActionBarWindow(DOCK_WINDOW_WIDTH, DOCK_WINDOW_HEIGHT);
+      void resizeActionBarWindow(DOCK_WINDOW_WIDTH, DOCK_WINDOW_HEIGHT)
+        .then(() => syncDockHoverFromSelection(event.payload));
     });
 
     return () => {
@@ -134,6 +146,87 @@ export default function ActionBar() {
   async function resizeActionBarWindow(width: number, height: number) {
     const { LogicalSize } = await import("@tauri-apps/api/dpi");
     await getCurrentWindow().setSize(new LogicalSize(width, height));
+  }
+
+  function setDockItemRef(id: string, node: HTMLButtonElement | null) {
+    dockItemRefs.current[id] = node;
+  }
+
+  function clearDockHover() {
+    mouseX.set(Infinity);
+    setHoveredAction(null);
+  }
+
+  function syncDockHoverFromClientPoint(clientX: number, clientY: number) {
+    const dockNode = dockRef.current;
+    if (!dockNode) {
+      clearDockHover();
+      return;
+    }
+
+    const dockBounds = dockNode.getBoundingClientRect();
+    const withinX = clientX >= dockBounds.left - 18 && clientX <= dockBounds.right + 18;
+    const withinY = clientY >= dockBounds.top - 10 && clientY <= dockBounds.bottom + 12;
+
+    if (!withinX || !withinY) {
+      clearDockHover();
+      return;
+    }
+
+    const entries = Object.entries(dockItemRefs.current).filter(
+      (entry): entry is [string, HTMLButtonElement] => !!entry[1]
+    );
+
+    if (!entries.length) {
+      mouseX.set(clientX);
+      return;
+    }
+
+    let nearestId: string | null = null;
+    let nearestCenter = clientX;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    for (const [id, node] of entries) {
+      const bounds = node.getBoundingClientRect();
+      const center = bounds.x + bounds.width / 2;
+      const distance = Math.abs(clientX - center);
+
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestCenter = center;
+        nearestId = id;
+      }
+    }
+
+    mouseX.set(nearestCenter);
+    setHoveredAction(nearestId);
+  }
+
+  async function syncDockHoverFromSelection(selection: Selection) {
+    if (selection.mouseX == null || selection.mouseY == null) {
+      clearDockHover();
+      return;
+    }
+
+    const win = getCurrentWindow();
+
+    const applyPointerState = async () => {
+      const [outerPos, scaleFactor] = await Promise.all([
+        win.outerPosition(),
+        win.scaleFactor(),
+      ]);
+
+      const clientX = (selection.mouseX! - outerPos.x) / scaleFactor;
+      const clientY = (selection.mouseY! - outerPos.y) / scaleFactor;
+      syncDockHoverFromClientPoint(clientX, clientY);
+    };
+
+    window.requestAnimationFrame(() => {
+      void applyPointerState();
+      window.requestAnimationFrame(() => {
+        void applyPointerState();
+      });
+    });
   }
 
   useEffect(() => {
@@ -175,6 +268,54 @@ export default function ActionBar() {
       window.cancelAnimationFrame(frame);
     };
   }, [composerMode, result, resultTitle, resultTone, showSelectedText, statusMessage, showSettingsCta, replaceApplied, loading]);
+
+  useEffect(() => {
+    if (composerMode || result) {
+      clearDockHover();
+      return;
+    }
+
+    let cancelled = false;
+    let inFlight = false;
+    const win = getCurrentWindow();
+
+    const pollCursor = async () => {
+      if (cancelled || inFlight || !dockRef.current) {
+        return;
+      }
+
+      inFlight = true;
+      try {
+        const [cursor, outerPos, scaleFactor] = await Promise.all([
+          invoke<CursorPosition>("get_cursor_position"),
+          win.outerPosition(),
+          win.scaleFactor(),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        const clientX = (cursor.x - outerPos.x) / scaleFactor;
+        const clientY = (cursor.y - outerPos.y) / scaleFactor;
+        syncDockHoverFromClientPoint(clientX, clientY);
+      } catch {
+        // Ignore transient window or cursor lookup errors while the action bar is hidden/repositioning.
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    void pollCursor();
+    const interval = window.setInterval(() => {
+      void pollCursor();
+    }, 70);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [composerMode, result]);
 
   async function revealPanel({
     title,
@@ -647,7 +788,7 @@ export default function ActionBar() {
         gap: 8,
         width: "fit-content",
         maxWidth: "100%",
-        padding: "28px 16px 18px",
+        padding: "22px 14px 14px",
         boxSizing: "border-box",
         background: "transparent",
         overflow: "visible",
@@ -655,33 +796,34 @@ export default function ActionBar() {
     >
       {/* Dock bar */}
       <motion.div
+        ref={dockRef}
         className="dock-container"
-        onMouseMove={(event) => mouseX.set(event.clientX)}
-        onMouseLeave={() => {
-          mouseX.set(Infinity);
-          setHoveredAction(null);
-        }}
+        onMouseMove={(event) => syncDockHoverFromClientPoint(event.clientX, event.clientY)}
+        onMouseEnter={(event) => syncDockHoverFromClientPoint(event.clientX, event.clientY)}
+        onMouseLeave={clearDockHover}
         style={{
           display: "flex",
-          alignItems: "center",
-          gap: 5,
-          padding: "7px 12px",
-          borderRadius: 20,
-          background: "linear-gradient(180deg, rgba(255,255,255,0.9), rgba(255,255,255,0.76))",
-          backdropFilter: "blur(16px)",
-          WebkitBackdropFilter: "blur(16px)",
-          border: "1px solid rgba(255,255,255,0.78)",
-          boxShadow: "0 10px 22px rgba(15,23,42,0.09), 0 2px 6px rgba(15,23,42,0.05)",
+          alignItems: "flex-end",
+          gap: 8,
+          padding: "6px 10px 8px",
+          borderRadius: 22,
+          background: "linear-gradient(180deg, rgba(255,255,255,0.985), rgba(248,250,252,0.96))",
+          backdropFilter: "blur(14px)",
+          WebkitBackdropFilter: "blur(14px)",
+          border: "1px solid rgba(226,232,240,0.96)",
+          boxShadow: "0 14px 28px rgba(15,23,42,0.08), inset 0 1px 0 rgba(255,255,255,0.94)",
         }}
       >
         {actions.map((a) => (
           <DockIcon
             key={a.id}
+            id={a.id}
             mouseX={mouseX}
             label={a.label}
             hovered={hoveredAction === a.id}
             isLoading={loading === a.id}
             onHoverChange={(next) => setHoveredAction(next ? a.id : null)}
+            setButtonRef={setDockItemRef}
             onClick={a.action}
           >
             {a.icon}
@@ -699,10 +841,10 @@ export default function ActionBar() {
             maxWidth: "96vw",
             padding: "16px 16px 14px",
             borderRadius: 22,
-            background: "linear-gradient(180deg, rgba(255,255,255,0.94), rgba(248,250,252,0.84))",
-            backdropFilter: "blur(18px)",
-            WebkitBackdropFilter: "blur(18px)",
-            border: "1px solid rgba(255,255,255,0.72)",
+            background: "linear-gradient(180deg, rgba(255,255,255,0.99), rgba(248,250,252,0.965))",
+            backdropFilter: "blur(12px)",
+            WebkitBackdropFilter: "blur(12px)",
+            border: "1px solid rgba(226,232,240,0.94)",
             boxShadow: "0 20px 36px rgba(15,23,42,0.14), 0 6px 14px rgba(15,23,42,0.08)",
           }}
         >
@@ -727,7 +869,7 @@ export default function ActionBar() {
                   fontWeight: 700,
                   letterSpacing: "0.03em",
                   color: "var(--accent)",
-                  background: "rgba(59,130,246,0.1)",
+                  background: "rgba(59,130,246,0.12)",
                   marginBottom: 8,
                 }}
               >
@@ -749,7 +891,7 @@ export default function ActionBar() {
                 gap: 6,
                 padding: 4,
                 borderRadius: 999,
-                background: "rgba(15,23,42,0.06)",
+                background: "rgba(15,23,42,0.08)",
               }}
             >
               <button
@@ -785,8 +927,8 @@ export default function ActionBar() {
               resize: "none",
               borderRadius: 14,
               border: "1px solid rgba(148,163,184,0.24)",
-              background: "rgba(255,255,255,0.82)",
-              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.65)",
+              background: "rgba(255,255,255,0.97)",
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9)",
               padding: "12px 13px",
               color: "var(--fg)",
               fontSize: 13,
@@ -826,7 +968,7 @@ export default function ActionBar() {
                   padding: "5px 10px",
                   borderRadius: 999,
                   border: "1px solid rgba(148,163,184,0.16)",
-                  background: "rgba(255,255,255,0.82)",
+                  background: "rgba(255,255,255,0.94)",
                   color: "var(--fg)",
                   fontSize: 12,
                   cursor: "pointer",
@@ -887,10 +1029,10 @@ export default function ActionBar() {
             maxWidth: "96vw",
             padding: "16px 16px 14px",
             borderRadius: 22,
-            background: "linear-gradient(180deg, rgba(255,255,255,0.95), rgba(248,250,252,0.86))",
-            backdropFilter: "blur(18px)",
-            WebkitBackdropFilter: "blur(18px)",
-            border: "1px solid rgba(255,255,255,0.72)",
+            background: "linear-gradient(180deg, rgba(255,255,255,0.992), rgba(248,250,252,0.972))",
+            backdropFilter: "blur(12px)",
+            WebkitBackdropFilter: "blur(12px)",
+            border: "1px solid rgba(226,232,240,0.95)",
             boxShadow: "0 20px 36px rgba(15,23,42,0.16), 0 6px 14px rgba(15,23,42,0.08)",
           }}
         >
@@ -945,7 +1087,7 @@ export default function ActionBar() {
                 borderRadius: 999,
                 fontSize: 11,
                 fontWeight: 600,
-                background: "rgba(15,23,42,0.06)",
+                background: "rgba(15,23,42,0.08)",
                 color: "var(--muted)",
               }}
             >
@@ -975,12 +1117,12 @@ export default function ActionBar() {
               padding: "14px 14px",
               borderRadius: 16,
               background: isErrorResult
-                ? "linear-gradient(180deg, rgba(254,242,242,0.92), rgba(254,226,226,0.82))"
-                : "linear-gradient(180deg, rgba(255,255,255,0.86), rgba(241,245,249,0.86))",
+                ? "linear-gradient(180deg, rgba(254,242,242,0.98), rgba(254,226,226,0.94))"
+                : "linear-gradient(180deg, rgba(255,255,255,0.985), rgba(241,245,249,0.965))",
               border: isErrorResult
-                ? "1px solid rgba(220, 38, 38, 0.12)"
-                : "1px solid rgba(148,163,184,0.14)",
-              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.72)",
+                ? "1px solid rgba(220, 38, 38, 0.18)"
+                : "1px solid rgba(148,163,184,0.18)",
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9)",
             }}
           >
             {result}
@@ -1061,8 +1203,8 @@ export default function ActionBar() {
                 marginTop: 12,
                 padding: "12px 13px",
                 borderRadius: 14,
-                background: "rgba(241,245,249,0.82)",
-                border: "1px solid rgba(148,163,184,0.14)",
+                background: "rgba(241,245,249,0.96)",
+                border: "1px solid rgba(148,163,184,0.18)",
                 fontSize: 12,
                 color: "var(--muted)",
                 lineHeight: 1.58,
@@ -1354,20 +1496,24 @@ function describeReplaceError(message: string, sourceName: string): {
 }
 
 function DockIcon({
+  id,
   mouseX,
   children,
   label,
   hovered,
   isLoading,
   onHoverChange,
+  setButtonRef,
   onClick,
 }: {
+  id: string;
   mouseX: MotionValue<number>;
   children: React.ReactNode;
   label: string;
   hovered: boolean;
   isLoading: boolean;
   onHoverChange: (hovered: boolean) => void;
+  setButtonRef: (id: string, node: HTMLButtonElement | null) => void;
   onClick: () => void;
 }) {
   const ref = useRef<HTMLButtonElement | null>(null);
@@ -1390,45 +1536,95 @@ function DockIcon({
       damping: 18,
     }
   );
+  const lift = useSpring(
+    useTransform(size, [DOCK_SIZE, DOCK_MAGNIFICATION], [0, -6]),
+    {
+      mass: 0.2,
+      stiffness: 220,
+      damping: 20,
+    }
+  );
+  const iconScale = useSpring(
+    useTransform(size, [DOCK_SIZE, DOCK_MAGNIFICATION], [1, 1.1]),
+    {
+      mass: 0.2,
+      stiffness: 220,
+      damping: 20,
+    }
+  );
+  const setMouseToCenter = () => {
+    const bounds = ref.current?.getBoundingClientRect();
+    if (!bounds) {
+      return;
+    }
+    mouseX.set(bounds.x + bounds.width / 2);
+  };
 
   return (
-    <div style={{ position: "relative" }}>
-      {hovered && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: "calc(100% + 6px)",
-            left: "50%",
-            transform: "translateX(-50%)",
-            padding: "3px 8px",
-            borderRadius: 6,
-            background: "var(--fg)",
-            color: "var(--bg)",
-            fontSize: 11,
-            whiteSpace: "nowrap",
-            pointerEvents: "none",
-            zIndex: 10,
-          }}
-        >
-          {label}
-        </div>
-      )}
+    <div style={{ position: "relative", display: "flex", alignItems: "flex-end" }}>
+      <AnimatePresence>
+        {hovered && (
+          <motion.div
+            initial={{ opacity: 0, y: 6, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 6, scale: 0.96 }}
+            transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
+            style={{
+              position: "absolute",
+              bottom: "calc(100% + 8px)",
+              left: "50%",
+              transform: "translateX(-50%)",
+              padding: "4px 8px",
+              borderRadius: 9,
+              background: "rgba(17,24,39,0.94)",
+              color: "#f8fafc",
+              fontSize: 11,
+              fontWeight: 600,
+              whiteSpace: "nowrap",
+              pointerEvents: "none",
+              zIndex: 10,
+              boxShadow: "0 10px 18px rgba(15,23,42,0.18)",
+            }}
+          >
+            {label}
+          </motion.div>
+        )}
+      </AnimatePresence>
       <motion.button
-        ref={ref}
+        ref={(node) => {
+          ref.current = node;
+          setButtonRef(id, node);
+        }}
         type="button"
         className={`dock-icon ${hovered ? "dock-icon-hovered" : ""}`}
-        style={{ width: size, height: size }}
-        onMouseEnter={() => onHoverChange(true)}
+        style={{ width: size, height: size, y: lift }}
+        onMouseEnter={() => {
+          setMouseToCenter();
+          onHoverChange(true);
+        }}
+        onMouseMove={(event) => {
+          mouseX.set(event.clientX);
+        }}
         onMouseLeave={() => onHoverChange(false)}
         aria-label={label}
         title={label}
+        data-dock-id={id}
         onClick={onClick}
       >
-        {isLoading ? (
-          <Loader2 size={18} className="spin" />
-        ) : (
-          children
-        )}
+        <motion.div
+          style={{
+            scale: iconScale,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {isLoading ? (
+            <Loader2 size={18} className="spin" />
+          ) : (
+            children
+          )}
+        </motion.div>
       </motion.button>
     </div>
   );

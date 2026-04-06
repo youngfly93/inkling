@@ -1,16 +1,28 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use serde::Serialize;
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 
 use super::selection::SelectionSnapshot;
 
+#[cfg(target_os = "macos")]
+use cocoa::base::{id, NO, YES};
+#[cfg(target_os = "macos")]
+use objc::{msg_send, sel, sel_impl};
+
 // Global state to hold the current selection for the action bar
 pub static CURRENT_SELECTION: Mutex<Option<SelectionSnapshot>> = Mutex::new(None);
 
 // Flag: true when an AI action or save is in progress
 pub static ACTIONBAR_BUSY: AtomicBool = AtomicBool::new(false);
+
+#[derive(Serialize)]
+pub struct CursorPosition {
+    pub x: f64,
+    pub y: f64,
+}
 
 pub fn is_actionbar_busy(_app: &AppHandle) -> bool {
     if ACTIONBAR_BUSY.load(Ordering::Relaxed) {
@@ -65,11 +77,20 @@ pub fn open_library(app: &AppHandle) {
 }
 
 const ACTIONBAR_LABEL: &str = "actionbar";
-const ACTIONBAR_WINDOW_WIDTH: f64 = 472.0;
-const ACTIONBAR_WINDOW_HEIGHT: f64 = 124.0;
+const ACTIONBAR_WINDOW_WIDTH: f64 = 420.0;
+const ACTIONBAR_WINDOW_HEIGHT: f64 = 106.0;
 
 fn configure_actionbar_panel(win: &WebviewWindow) {
     let _ = win.set_shadow(false);
+
+    #[cfg(target_os = "macos")]
+    if let Ok(ns_window) = win.ns_window() {
+        unsafe {
+            let ns_window = ns_window as id;
+            let _: () = msg_send![ns_window, setAcceptsMouseMovedEvents: YES];
+            let _: () = msg_send![ns_window, setIgnoresMouseEvents: NO];
+        }
+    }
 }
 
 fn calc_position(app: &AppHandle, snapshot: &SelectionSnapshot) -> (f64, f64) {
@@ -173,4 +194,13 @@ pub fn get_current_selection() -> Result<SelectionSnapshot, String> {
         .map_err(|e| format!("Lock error: {}", e))?
         .clone()
         .ok_or_else(|| "No selection available".to_string())
+}
+
+#[tauri::command]
+pub fn get_cursor_position(app: AppHandle) -> Result<CursorPosition, String> {
+    let pos = app
+        .cursor_position()
+        .map_err(|e| format!("Cursor position error: {}", e))?;
+
+    Ok(CursorPosition { x: pos.x, y: pos.y })
 }

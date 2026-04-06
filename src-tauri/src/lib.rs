@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
-    tray::TrayIconBuilder,
+    tray::{TrayIcon, TrayIconBuilder},
     ActivationPolicy,
     Manager,
     RunEvent,
@@ -12,6 +12,8 @@ use tauri::{
 };
 
 static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
+
+struct AppTray<R: tauri::Runtime>(TrayIcon<R>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -68,7 +70,7 @@ pub fn run() {
                 .item(&quit_item)
                 .build()?;
 
-            let _tray = TrayIconBuilder::new()
+            let tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .icon_as_template(true)
                 .menu(&menu)
@@ -87,6 +89,11 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            // Keep the tray alive for the whole app lifetime. If the last TrayIcon
+            // instance is dropped, macOS removes the status item and the accessory app
+            // can disappear with no visible surface left.
+            let _ = app.manage(AppTray(tray));
+
             // Start selection monitor (auto-popup on text selection)
             commands::selection::start_monitor(app.handle());
 
@@ -99,6 +106,7 @@ pub fn run() {
             commands::selection::replace_selection,
             commands::selection::undo_last_replace,
             commands::windowing::get_current_selection,
+            commands::windowing::get_cursor_position,
             commands::windowing::set_actionbar_busy,
             commands::windowing::open_settings_window,
             commands::library::save_sentence,

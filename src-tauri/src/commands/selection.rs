@@ -293,7 +293,10 @@ pub fn start_monitor(app: &tauri::AppHandle) {
                                 return;
                             }
                             eprintln!("Monitor: clearing action bar");
-                            super::windowing::close_action_bars(&h);
+                            let main_handle = h.clone();
+                            let _ = h.run_on_main_thread(move || {
+                                super::windowing::close_action_bars(&main_handle);
+                            });
                         });
                         continue;
                     }
@@ -305,7 +308,10 @@ pub fn start_monitor(app: &tauri::AppHandle) {
                     let h = handle.clone();
                     let s = snapshot.clone();
                     tauri::async_runtime::spawn(async move {
-                        super::windowing::open_action_bar(&h, &s);
+                        let main_handle = h.clone();
+                        let _ = h.run_on_main_thread(move || {
+                            super::windowing::open_action_bar(&main_handle, &s);
+                        });
                     });
                 }
                 Err(e) => {
