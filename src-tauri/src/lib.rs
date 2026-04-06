@@ -94,6 +94,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::ai::transform_text,
+            commands::ai::custom_text_action,
             commands::selection::get_selection,
             commands::selection::replace_selection,
             commands::selection::undo_last_replace,

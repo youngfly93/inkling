@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
@@ -8,6 +8,9 @@ import {
   Maximize2,
   Bookmark,
   Copy,
+  ChevronDown,
+  ChevronUp,
+  MessageSquare,
   Loader2,
   Check,
   AlertCircle,
@@ -37,6 +40,8 @@ interface DockAction {
 }
 
 type ResultTone = "neutral" | "success" | "warning" | "error";
+type ComposerMode = "ask" | "improve";
+type ResultKind = "rewrite" | "answer" | "error" | "status";
 
 export default function ActionBar() {
   const [sel, setSel] = useState<Selection>({ text: "", app: "", url: "", editable: false });
@@ -49,6 +54,12 @@ export default function ActionBar() {
   const [replaceApplied, setReplaceApplied] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [hoveredAction, setHoveredAction] = useState<string | null>(null);
+  const [composerMode, setComposerMode] = useState<ComposerMode | null>(null);
+  const [composerPrompt, setComposerPrompt] = useState("");
+  const [resultCanReplace, setResultCanReplace] = useState(false);
+  const [resultKind, setResultKind] = useState<ResultKind>("rewrite");
+  const [showSelectedText, setShowSelectedText] = useState(false);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const mouseX = useMotionValue(Infinity);
   const text = sel.text;
   const app = sel.app;
@@ -80,6 +91,11 @@ export default function ActionBar() {
       setReplaceApplied(false);
       setStatusMessage(null);
       setHoveredAction(null);
+      setComposerMode(null);
+      setComposerPrompt("");
+      setResultCanReplace(false);
+      setResultKind("rewrite");
+      setShowSelectedText(false);
       mouseX.set(Infinity);
       void resizeActionBarWindow(430, 88);
     });
@@ -91,6 +107,22 @@ export default function ActionBar() {
       unlisten.then((fn) => fn());
     };
   }, []);
+
+  useEffect(() => {
+    if (!composerMode) {
+      return;
+    }
+
+    const id = window.setTimeout(() => {
+      composerRef.current?.focus();
+      composerRef.current?.setSelectionRange(
+        composerRef.current.value.length,
+        composerRef.current.value.length
+      );
+    }, 40);
+
+    return () => window.clearTimeout(id);
+  }, [composerMode]);
 
   async function resizeActionBarWindow(width: number, height: number) {
     const { LogicalSize } = await import("@tauri-apps/api/dpi");
@@ -104,6 +136,8 @@ export default function ActionBar() {
     status = null,
     showSettings = false,
     height = 340,
+    canReplace = false,
+    kind = "rewrite",
   }: {
     title: string;
     body: string;
@@ -111,13 +145,66 @@ export default function ActionBar() {
     status?: string | null;
     showSettings?: boolean;
     height?: number;
+    canReplace?: boolean;
+    kind?: ResultKind;
   }) {
     setResultTitle(title);
     setResult(body);
     setResultTone(tone);
     setStatusMessage(status);
     setShowSettingsCta(showSettings);
+    setResultCanReplace(canReplace);
+    setResultKind(kind);
+    setShowSelectedText(false);
+    setComposerMode(null);
     await resizeActionBarWindow(540, height);
+    await getCurrentWindow().show();
+  }
+
+  function resetInlinePanels() {
+    setResult(null);
+    setResultTitle(null);
+    setResultTone("neutral");
+    setShowSettingsCta(false);
+    setStatusMessage(null);
+    setReplaceApplied(false);
+    setResultCanReplace(false);
+    setResultKind("rewrite");
+    setShowSelectedText(false);
+  }
+
+  async function collapseToDock() {
+    setComposerMode(null);
+    setComposerPrompt("");
+    resetInlinePanels();
+    await resizeActionBarWindow(430, 88);
+  }
+
+  async function loadAIConfig() {
+    const apiKey = await invoke<string | null>("get_setting", {
+      key: "kimi_api_key",
+    });
+    const apiHost = await invoke<string | null>("get_setting", {
+      key: "kimi_api_host",
+    });
+    const model = await invoke<string | null>("get_setting", {
+      key: "kimi_model",
+    });
+
+    return {
+      apiKey: (apiKey || "").trim(),
+      apiHost: apiHost || "api.moonshot.cn",
+      model: model || "moonshot-v1-8k",
+    };
+  }
+
+  async function openComposer(mode: ComposerMode) {
+    setComposerMode(mode);
+    setComposerPrompt("");
+    setCopied(false);
+    resetInlinePanels();
+    setStatusMessage(null);
+    await resizeActionBarWindow(540, 242);
     await getCurrentWindow().show();
   }
 
@@ -131,7 +218,17 @@ export default function ActionBar() {
 
       if (key === "escape") {
         e.preventDefault();
-        void getCurrentWindow().hide();
+        if (composerMode) {
+          void collapseToDock();
+        } else {
+          void getCurrentWindow().hide();
+        }
+        return;
+      }
+
+      if (composerMode && key === "enter" && !e.shiftKey) {
+        e.preventDefault();
+        void runCustomAI();
         return;
       }
 
@@ -145,7 +242,7 @@ export default function ActionBar() {
         return;
       }
 
-      if (result && !replaceApplied && !isErrorResult && sel.editable && e.key === "Enter") {
+      if (result && !replaceApplied && !isErrorResult && resultCanReplace && e.key === "Enter") {
         e.preventDefault();
         void replaceResult();
         return;
@@ -166,9 +263,13 @@ export default function ActionBar() {
           break;
         case "4":
           e.preventDefault();
-          void handleSave();
+          void openComposer("ask");
           break;
         case "5":
+          e.preventDefault();
+          void handleSave();
+          break;
+        case "6":
           e.preventDefault();
           copyText();
           break;
@@ -180,7 +281,7 @@ export default function ActionBar() {
       window.removeEventListener("blur", onBlur);
       window.removeEventListener("keydown", onKey);
     };
-  }, [isErrorResult, loading, replaceApplied, result, sel.editable]);
+  }, [composerMode, composerPrompt, isErrorResult, loading, replaceApplied, result, resultCanReplace]);
 
   async function runAI(actionId: string) {
     setLoading(actionId);
@@ -189,18 +290,9 @@ export default function ActionBar() {
     setStatusMessage(null);
     await invoke("set_actionbar_busy", { busy: true });
     try {
-      const apiKey = await invoke<string | null>("get_setting", {
-        key: "kimi_api_key",
-      });
-      const apiHost = await invoke<string | null>("get_setting", {
-        key: "kimi_api_host",
-      });
-      const model = await invoke<string | null>("get_setting", {
-        key: "kimi_model",
-      });
-      const normalizedApiKey = (apiKey || "").trim();
+      const config = await loadAIConfig();
 
-      if (!normalizedApiKey) {
+      if (!config.apiKey) {
         await revealPanel({
           title: "Kimi API key is missing",
           body: "Open Settings from the menu bar and add your Kimi key before running To English, To Chinese, or Expand.",
@@ -208,6 +300,7 @@ export default function ActionBar() {
           status: "AI actions stay unavailable until the key is configured.",
           showSettings: true,
           height: 300,
+          kind: "error",
         });
         return;
       }
@@ -215,15 +308,15 @@ export default function ActionBar() {
       const output = await invoke<string>("transform_text", {
         text,
         action: actionId,
-        apiKey: normalizedApiKey,
-        apiHost: apiHost || "api.moonshot.cn",
-        model: model || "moonshot-v1-8k",
+        apiKey: config.apiKey,
+        apiHost: config.apiHost,
+        model: config.model,
       });
 
       // Save transform to db
       try {
         const sentenceId = await dbSave(text, app || null, url || null);
-        await saveTransform(sentenceId, actionId, text, output, model || "moonshot-v1-8k");
+        await saveTransform(sentenceId, actionId, text, output, config.model);
       } catch (_) { /* best effort */ }
 
       await revealPanel({
@@ -234,6 +327,8 @@ export default function ActionBar() {
           ? `${sourceName} is editable here. Press Enter or click Replace to write back.`
           : `${sourceName} is read-only here. Copy is available, but Replace stays hidden.`,
         height: 360,
+        canReplace: sel.editable,
+        kind: "rewrite",
       });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -246,6 +341,93 @@ export default function ActionBar() {
         status: friendly.status,
         showSettings: friendly.showSettingsCta,
         height: 320,
+        kind: "error",
+      });
+      setReplaceApplied(false);
+    } finally {
+      setLoading(null);
+      await invoke("set_actionbar_busy", { busy: false });
+    }
+  }
+
+  async function runCustomAI() {
+    if (!composerMode) {
+      return;
+    }
+
+    const instruction = composerPrompt.trim();
+    if (!instruction) {
+      setStatusMessage("Enter a question or rewrite instruction first.");
+      return;
+    }
+
+    setLoading("custom_ai");
+    setCopied(false);
+    setReplaceApplied(false);
+    setStatusMessage(null);
+    await invoke("set_actionbar_busy", { busy: true });
+    try {
+      const config = await loadAIConfig();
+
+      if (!config.apiKey) {
+        await revealPanel({
+          title: "Kimi API key is missing",
+          body: "Open Settings from the menu bar and add your Kimi key before using Ask AI or Improve.",
+          tone: "error",
+          status: "Custom AI actions stay unavailable until the key is configured.",
+          showSettings: true,
+          height: 300,
+          kind: "error",
+        });
+        return;
+      }
+
+      const output = await invoke<string>("custom_text_action", {
+        text,
+        mode: composerMode,
+        instruction,
+        apiKey: config.apiKey,
+        apiHost: config.apiHost,
+        model: config.model,
+      });
+
+      try {
+        const sentenceId = await dbSave(text, app || null, url || null);
+        await saveTransform(
+          sentenceId,
+          composerMode === "ask" ? "ask_ai" : "improve_custom",
+          text,
+          output,
+          config.model
+        );
+      } catch (_) { /* best effort */ }
+
+      const canReplace = composerMode === "improve" && sel.editable;
+      await revealPanel({
+        title: composerMode === "ask" ? "Answer ready" : "Improved text ready",
+        body: output,
+        tone: "neutral",
+        status: composerMode === "ask"
+          ? "This result answers your question about the selected text. Copy is available."
+          : sel.editable
+          ? `${sourceName} is editable here. Press Enter or click Replace to write back.`
+          : `${sourceName} is read-only here. Copy is available, but Replace stays hidden.`,
+        height: 380,
+        canReplace,
+        kind: composerMode === "ask" ? "answer" : "rewrite",
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.error("Custom AI error:", e);
+      const friendly = describeTransformError(message);
+      await revealPanel({
+        title: friendly.title,
+        body: friendly.detail,
+        tone: "error",
+        status: friendly.status,
+        showSettings: friendly.showSettingsCta,
+        height: 320,
+        kind: "error",
       });
       setReplaceApplied(false);
     } finally {
@@ -271,6 +453,7 @@ export default function ActionBar() {
         tone: "error",
         status: "Try again after the current action finishes.",
         height: 300,
+        kind: "error",
       });
     } finally {
       setLoading(null);
@@ -301,6 +484,8 @@ export default function ActionBar() {
       setReplaceApplied(true);
       setResultTitle("Replaced in place");
       setResultTone("success");
+      setResultKind("status");
+      setShowSelectedText(false);
       setStatusMessage("Cmd/Ctrl+Z or Undo can restore the last replace in supported editors.");
       setShowSettingsCta(false);
       await getCurrentWindow().show();
@@ -311,6 +496,7 @@ export default function ActionBar() {
       setResultTitle(friendly.title);
       setResult(friendly.detail);
       setResultTone("error");
+      setResultKind("error");
       setStatusMessage(friendly.status);
       setShowSettingsCta(false);
       setReplaceApplied(false);
@@ -340,6 +526,7 @@ export default function ActionBar() {
         tone: "error",
         status: "If the source app changed state, re-select the text and try again.",
         height: 300,
+        kind: "error",
       });
     } finally {
       setLoading(null);
@@ -372,14 +559,20 @@ export default function ActionBar() {
       action: () => runAI("expand"),
     },
     {
+      id: "custom_ai",
+      label: "4 Ask / Improve",
+      icon: <MessageSquare size={20} />,
+      action: () => openComposer("ask"),
+    },
+    {
       id: "save",
-      label: "4 Save",
+      label: "5 Save",
       icon: <Bookmark size={20} />,
       action: handleSave,
     },
     {
       id: "copy",
-      label: "5 Copy",
+      label: "6 Copy",
       icon: <Copy size={20} />,
       action: copyText,
     },
@@ -408,14 +601,14 @@ export default function ActionBar() {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 4,
-          padding: "6px 10px",
-          borderRadius: 16,
-          background: "var(--surface)",
+          gap: 5,
+          padding: "7px 12px",
+          borderRadius: 20,
+          background: "linear-gradient(180deg, rgba(255,255,255,0.9), rgba(255,255,255,0.76))",
           backdropFilter: "blur(16px)",
           WebkitBackdropFilter: "blur(16px)",
-          border: "0.5px solid rgba(128,128,128,0.2)",
-          boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+          border: "1px solid rgba(255,255,255,0.72)",
+          boxShadow: "0 18px 34px rgba(15,23,42,0.12), 0 4px 10px rgba(15,23,42,0.08)",
         }}
       >
         {actions.map((a) => (
@@ -433,19 +626,211 @@ export default function ActionBar() {
         ))}
       </motion.div>
 
-      {result && (
-        <div
+      {composerMode && !result && (
+        <motion.div
+          initial={{ opacity: 0, y: -10, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
           style={{
-            marginTop: 10,
-            width: 500,
+            marginTop: 8,
+            width: 504,
             maxWidth: "96vw",
-            padding: "14px 16px",
-            borderRadius: 16,
-            background: "var(--surface)",
-            backdropFilter: "blur(16px)",
-            WebkitBackdropFilter: "blur(16px)",
-            border: "0.5px solid rgba(128,128,128,0.2)",
-            boxShadow: "0 8px 28px rgba(0,0,0,0.14)",
+            padding: "16px 16px 14px",
+            borderRadius: 22,
+            background: "linear-gradient(180deg, rgba(255,255,255,0.94), rgba(248,250,252,0.84))",
+            backdropFilter: "blur(18px)",
+            WebkitBackdropFilter: "blur(18px)",
+            border: "1px solid rgba(255,255,255,0.72)",
+            boxShadow: "0 20px 36px rgba(15,23,42,0.14), 0 6px 14px rgba(15,23,42,0.08)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 12,
+              marginBottom: 12,
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "4px 9px",
+                  borderRadius: 999,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: "0.03em",
+                  color: "var(--accent)",
+                  background: "rgba(59,130,246,0.1)",
+                  marginBottom: 8,
+                }}
+              >
+                <MessageSquare size={12} />
+                {composerMode === "ask" ? "ASK AI" : "IMPROVE"}
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "var(--fg)" }}>
+                {composerMode === "ask" ? "Ask about this text" : "Improve this text"}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4, lineHeight: 1.5 }}>
+                {composerMode === "ask"
+                  ? `Ask for an explanation, answer, or insight based on the selected text from ${sourceName}.`
+                  : `Describe exactly how the selected text from ${sourceName} should be rewritten.`}
+              </div>
+            </div>
+            <div
+              style={{
+                display: "inline-flex",
+                gap: 6,
+                padding: 4,
+                borderRadius: 999,
+                background: "rgba(15,23,42,0.06)",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setComposerMode("ask")}
+                style={composerTabStyle(composerMode === "ask")}
+              >
+                Ask
+              </button>
+              <button
+                type="button"
+                onClick={() => setComposerMode("improve")}
+                style={composerTabStyle(composerMode === "improve")}
+              >
+                Improve
+              </button>
+            </div>
+          </div>
+
+          <textarea
+            ref={composerRef}
+            value={composerPrompt}
+            onChange={(event) => {
+              setComposerPrompt(event.target.value);
+              if (statusMessage) {
+                setStatusMessage(null);
+              }
+            }}
+            placeholder={composerPlaceholder(composerMode)}
+            rows={4}
+            style={{
+              width: "100%",
+              resize: "none",
+              borderRadius: 14,
+              border: "1px solid rgba(148,163,184,0.24)",
+              background: "rgba(255,255,255,0.82)",
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.65)",
+              padding: "12px 13px",
+              color: "var(--fg)",
+              fontSize: 13,
+              lineHeight: 1.55,
+              outline: "none",
+              boxSizing: "border-box",
+            }}
+          />
+
+          {statusMessage && (
+            <div
+              style={{
+                marginTop: 8,
+                fontSize: 12,
+                color: "var(--muted)",
+                lineHeight: 1.45,
+              }}
+            >
+              {statusMessage}
+            </div>
+          )}
+
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 8,
+              marginTop: 12,
+            }}
+          >
+            {composerSuggestions(composerMode).map((suggestion) => (
+              <button
+                key={suggestion}
+                type="button"
+                onClick={() => setComposerPrompt(suggestion)}
+                style={{
+                  padding: "5px 10px",
+                  borderRadius: 999,
+                  border: "1px solid rgba(148,163,184,0.16)",
+                  background: "rgba(255,255,255,0.82)",
+                  color: "var(--fg)",
+                  fontSize: 12,
+                  cursor: "pointer",
+                }}
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 12,
+              marginTop: 12,
+            }}
+          >
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>
+              {composerMode === "ask"
+                ? "Press Enter to ask. Shift+Enter inserts a new line."
+                : "Press Enter to generate a rewrite you can copy or replace."}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  void collapseToDock();
+                }}
+                style={secondaryButtonStyle()}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void runCustomAI();
+                }}
+                style={primaryButtonStyle()}
+              >
+                {loading === "custom_ai"
+                  ? composerMode === "ask" ? "Asking..." : "Improving..."
+                  : composerMode === "ask" ? "Ask AI" : "Run Improve"}
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {result && (
+        <motion.div
+          initial={{ opacity: 0, y: -10, scale: 0.985 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+          style={{
+            marginTop: 8,
+            width: 512,
+            maxWidth: "96vw",
+            padding: "16px 16px 14px",
+            borderRadius: 22,
+            background: "linear-gradient(180deg, rgba(255,255,255,0.95), rgba(248,250,252,0.86))",
+            backdropFilter: "blur(18px)",
+            WebkitBackdropFilter: "blur(18px)",
+            border: "1px solid rgba(255,255,255,0.72)",
+            boxShadow: "0 20px 36px rgba(15,23,42,0.16), 0 6px 14px rgba(15,23,42,0.08)",
           }}
         >
           <div
@@ -454,10 +839,10 @@ export default function ActionBar() {
               alignItems: "flex-start",
               justifyContent: "space-between",
               gap: 12,
-              marginBottom: 12,
+              marginBottom: 14,
             }}
           >
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-start", minWidth: 0 }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-start", minWidth: 0 }}>
               <div
                 style={{
                   marginTop: 1,
@@ -467,7 +852,15 @@ export default function ActionBar() {
                 {resultTone === "error" ? <AlertCircle size={16} /> : <Sparkles size={16} />}
               </div>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--fg)" }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                  <div style={resultBadgeStyle(resultKind, resultTone)}>
+                    {resultBadgeLabel(resultKind)}
+                  </div>
+                  <div style={capabilityBadgeStyle(resultKind, resultCanReplace, replaceApplied, isErrorResult)}>
+                    {capabilityBadgeLabel(resultKind, resultCanReplace, replaceApplied, isErrorResult)}
+                  </div>
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "var(--fg)" }}>
                   {resultTitle || "Result"}
                 </div>
                 {statusMessage && (
@@ -475,7 +868,7 @@ export default function ActionBar() {
                     style={{
                       fontSize: 12,
                       color: "var(--muted)",
-                      marginTop: 3,
+                      marginTop: 5,
                       lineHeight: 1.45,
                     }}
                   >
@@ -487,20 +880,12 @@ export default function ActionBar() {
             <div
               style={{
                 flexShrink: 0,
-                padding: "4px 8px",
+                padding: "5px 9px",
                 borderRadius: 999,
                 fontSize: 11,
                 fontWeight: 600,
-                background: resultTone === "error"
-                  ? "rgba(220, 38, 38, 0.12)"
-                  : resultTone === "success"
-                  ? "rgba(22, 163, 74, 0.12)"
-                  : "rgba(59, 130, 246, 0.12)",
-                color: resultTone === "error"
-                  ? "#b91c1c"
-                  : resultTone === "success"
-                  ? "#15803d"
-                  : "var(--accent)",
+                background: "rgba(15,23,42,0.06)",
+                color: "var(--muted)",
               }}
             >
               {sourceName}
@@ -511,52 +896,30 @@ export default function ActionBar() {
               fontSize: 11,
               color: "var(--muted)",
               textTransform: "uppercase",
-              letterSpacing: "0.04em",
-              marginBottom: 6,
+              letterSpacing: "0.06em",
+              marginBottom: 8,
             }}
           >
-            Selected text
+            {isErrorResult ? "Details" : "Output"}
           </div>
           <div
             style={{
-              fontSize: 12,
-              color: "var(--muted)",
-              marginBottom: 10,
-              lineHeight: 1.5,
-              maxHeight: 56,
-              overflowY: "auto",
+              fontSize: isErrorResult ? 14 : 15,
+              lineHeight: 1.72,
               whiteSpace: "pre-wrap",
-              padding: "8px 10px",
-              borderRadius: 10,
-              background: "rgba(127,127,127,0.08)",
-            }}
-          >
-            {text}
-          </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--muted)",
-              textTransform: "uppercase",
-              letterSpacing: "0.04em",
-              marginBottom: 6,
-            }}
-          >
-            {isErrorResult ? "What to do next" : "Output"}
-          </div>
-          <div
-            style={{
-              fontSize: 14,
-              lineHeight: 1.7,
-              whiteSpace: "pre-wrap",
-              maxHeight: 150,
+              maxHeight: 164,
               overflowY: "auto",
               userSelect: "text",
               WebkitUserSelect: "text",
-              padding: "10px 12px",
-              borderRadius: 12,
-              background: isErrorResult ? "rgba(220, 38, 38, 0.06)" : "rgba(127,127,127,0.08)",
-              border: isErrorResult ? "1px solid rgba(220, 38, 38, 0.15)" : "1px solid rgba(127,127,127,0.1)",
+              padding: "14px 14px",
+              borderRadius: 16,
+              background: isErrorResult
+                ? "linear-gradient(180deg, rgba(254,242,242,0.92), rgba(254,226,226,0.82))"
+                : "linear-gradient(180deg, rgba(255,255,255,0.86), rgba(241,245,249,0.86))",
+              border: isErrorResult
+                ? "1px solid rgba(220, 38, 38, 0.12)"
+                : "1px solid rgba(148,163,184,0.14)",
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.72)",
             }}
           >
             {result}
@@ -564,114 +927,93 @@ export default function ActionBar() {
           <div
             style={{
               display: "flex",
-              justifyContent: "flex-end",
+              justifyContent: "space-between",
+              alignItems: "center",
               flexWrap: "wrap",
-              gap: 8,
-              marginTop: 12,
+              gap: 10,
+              marginTop: 14,
             }}
           >
-            {!replaceApplied && sel.editable && !isErrorResult && (
-              <button
-                onClick={() => {
-                  void replaceResult();
-                }}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: 8,
-                  border: "none",
-                  background: "var(--accent)",
-                  color: "white",
-                  fontSize: 13,
-                  cursor: "pointer",
-                }}
-              >
-                {loading === "replace" ? "Replacing..." : "Replace"}
-              </button>
-            )}
-            {replaceApplied && (
-              <button
-                onClick={() => {
-                  void undoLastReplace();
-                }}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: 8,
-                  border: "none",
-                  background: "#111827",
-                  color: "white",
-                  fontSize: 13,
-                  cursor: "pointer",
-                }}
-              >
-                {loading === "undo" ? "Undoing..." : "Undo"}
-              </button>
-            )}
-            {showSettingsCta && (
-              <button
-                onClick={() => {
-                  void openSettings();
-                }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "6px 12px",
-                  borderRadius: 8,
-                  border: "1px solid var(--border)",
-                  background: "var(--bg)",
-                  color: "var(--fg)",
-                  fontSize: 13,
-                  cursor: "pointer",
-                }}
-              >
-                <ArrowUpRight size={14} />
-                Open Settings
-              </button>
-            )}
-            {!isErrorResult && (
-              <button
-                onClick={copyText}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  padding: "6px 14px",
-                  borderRadius: 8,
-                  border: "1px solid var(--border)",
-                  background: "var(--bg)",
-                  color: "var(--fg)",
-                  fontSize: 13,
-                  cursor: "pointer",
-                }}
-              >
-                {copied ? <Check size={14} color="#22c55e" /> : <Copy size={14} />}
-                {copied ? "Copied" : "Copy"}
-              </button>
-            )}
             <button
-              onClick={() => {
-                setResult(null);
-                setResultTitle(null);
-                setResultTone("neutral");
-                setShowSettingsCta(false);
-                setStatusMessage(null);
-                setReplaceApplied(false);
-                void resizeActionBarWindow(430, 88);
-              }}
+              type="button"
+              onClick={() => setShowSelectedText((open) => !open)}
+              style={selectedTextToggleStyle(showSelectedText)}
+            >
+              {showSelectedText ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              {showSelectedText ? "Hide Selected Text" : "Show Selected Text"}
+            </button>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end" }}>
+              {!replaceApplied && resultCanReplace && !isErrorResult && (
+                <button
+                  onClick={() => {
+                    void replaceResult();
+                  }}
+                  style={primaryButtonStyle()}
+                >
+                  {loading === "replace" ? "Replacing..." : "Replace"}
+                </button>
+              )}
+              {replaceApplied && (
+                <button
+                  onClick={() => {
+                    void undoLastReplace();
+                  }}
+                  style={primaryButtonStyle("#111827")}
+                >
+                  {loading === "undo" ? "Undoing..." : "Undo"}
+                </button>
+              )}
+              {showSettingsCta && (
+                <button
+                  onClick={() => {
+                    void openSettings();
+                  }}
+                  style={secondaryButtonStyle()}
+                >
+                  <ArrowUpRight size={14} />
+                  Open Settings
+                </button>
+              )}
+              {!isErrorResult && (
+                <button
+                  onClick={copyText}
+                  style={secondaryButtonStyle()}
+                >
+                  {copied ? <Check size={14} color="#22c55e" /> : <Copy size={14} />}
+                  {copied ? "Copied" : "Copy"}
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  void collapseToDock();
+                }}
+                style={secondaryButtonStyle()}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+          {showSelectedText && (
+            <div
               style={{
-                padding: "6px 14px",
-                borderRadius: 8,
-                border: "1px solid var(--border)",
-                background: "var(--bg)",
-                color: "var(--fg)",
-                fontSize: 13,
-                cursor: "pointer",
+                marginTop: 12,
+                padding: "12px 13px",
+                borderRadius: 14,
+                background: "rgba(241,245,249,0.82)",
+                border: "1px solid rgba(148,163,184,0.14)",
+                fontSize: 12,
+                color: "var(--muted)",
+                lineHeight: 1.58,
+                whiteSpace: "pre-wrap",
+                maxHeight: 92,
+                overflowY: "auto",
               }}
             >
-              Done
-            </button>
-          </div>
-        </div>
+              {text}
+            </div>
+          )}
+        </motion.div>
       )}
 
     </div>
@@ -689,6 +1031,39 @@ function getSourceName(selection: Selection): string {
   }
 
   return "Current app";
+}
+
+function composerPlaceholder(mode: ComposerMode): string {
+  return mode === "ask"
+    ? "Ask a question about the selected text. Example: What is the main argument here?"
+    : "Describe how to rewrite the selected text. Example: Make this more concise and professional.";
+}
+
+function composerSuggestions(mode: ComposerMode): string[] {
+  return mode === "ask"
+    ? [
+      "What is the main point of this text?",
+      "Explain this in simpler language.",
+      "What should I pay attention to here?",
+    ]
+    : [
+      "Make this more concise and professional.",
+      "Rewrite this in natural English.",
+      "Turn this into a clearer, more persuasive version.",
+    ];
+}
+
+function composerTabStyle(active: boolean): CSSProperties {
+  return {
+    padding: "5px 12px",
+    borderRadius: 999,
+    border: "none",
+    background: active ? "var(--fg)" : "transparent",
+    color: active ? "var(--bg)" : "var(--muted)",
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: "pointer",
+  };
 }
 
 function actionLabel(actionId: string): string {
