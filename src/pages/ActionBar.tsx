@@ -23,6 +23,11 @@ import { saveSentence as dbSave, saveTransform } from "../services/db";
 const DOCK_SIZE = 38;
 const DOCK_MAGNIFICATION = 58;
 const DOCK_DISTANCE = 110;
+const DOCK_WINDOW_WIDTH = 472;
+const DOCK_WINDOW_HEIGHT = 124;
+const PANEL_WINDOW_WIDTH = 576;
+const WINDOW_SHADOW_BLEED_X = 18;
+const WINDOW_SHADOW_BLEED_Y = 20;
 
 interface Selection {
   text: string;
@@ -59,7 +64,9 @@ export default function ActionBar() {
   const [resultCanReplace, setResultCanReplace] = useState(false);
   const [resultKind, setResultKind] = useState<ResultKind>("rewrite");
   const [showSelectedText, setShowSelectedText] = useState(false);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const lastMeasuredWindowSize = useRef<{ width: number; height: number } | null>(null);
   const mouseX = useMotionValue(Infinity);
   const text = sel.text;
   const app = sel.app;
@@ -97,7 +104,7 @@ export default function ActionBar() {
       setResultKind("rewrite");
       setShowSelectedText(false);
       mouseX.set(Infinity);
-      void resizeActionBarWindow(430, 88);
+      void resizeActionBarWindow(DOCK_WINDOW_WIDTH, DOCK_WINDOW_HEIGHT);
     });
 
     return () => {
@@ -129,6 +136,46 @@ export default function ActionBar() {
     await getCurrentWindow().setSize(new LogicalSize(width, height));
   }
 
+  useEffect(() => {
+    const node = contentRef.current;
+    if (!node) {
+      return;
+    }
+
+    let frame = 0;
+
+    const syncWindowToContent = () => {
+      const width = Math.ceil(node.scrollWidth + WINDOW_SHADOW_BLEED_X);
+      const height = Math.ceil(node.scrollHeight + WINDOW_SHADOW_BLEED_Y);
+      const last = lastMeasuredWindowSize.current;
+
+      if (last && Math.abs(last.width - width) < 2 && Math.abs(last.height - height) < 2) {
+        return;
+      }
+
+      lastMeasuredWindowSize.current = { width, height };
+      void resizeActionBarWindow(width, height);
+    };
+
+    const scheduleSync = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(syncWindowToContent);
+    };
+
+    scheduleSync();
+
+    const observer = new ResizeObserver(() => {
+      scheduleSync();
+    });
+
+    observer.observe(node);
+
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+    };
+  }, [composerMode, result, resultTitle, resultTone, showSelectedText, statusMessage, showSettingsCta, replaceApplied, loading]);
+
   async function revealPanel({
     title,
     body,
@@ -157,7 +204,7 @@ export default function ActionBar() {
     setResultKind(kind);
     setShowSelectedText(false);
     setComposerMode(null);
-    await resizeActionBarWindow(540, height);
+    await resizeActionBarWindow(PANEL_WINDOW_WIDTH, height);
     await getCurrentWindow().show();
   }
 
@@ -177,7 +224,7 @@ export default function ActionBar() {
     setComposerMode(null);
     setComposerPrompt("");
     resetInlinePanels();
-    await resizeActionBarWindow(430, 88);
+    await resizeActionBarWindow(DOCK_WINDOW_WIDTH, DOCK_WINDOW_HEIGHT);
   }
 
   async function loadAIConfig() {
@@ -204,7 +251,7 @@ export default function ActionBar() {
     setCopied(false);
     resetInlinePanels();
     setStatusMessage(null);
-    await resizeActionBarWindow(540, 242);
+    await resizeActionBarWindow(PANEL_WINDOW_WIDTH, 286);
     await getCurrentWindow().show();
   }
 
@@ -500,7 +547,7 @@ export default function ActionBar() {
       setStatusMessage(friendly.status);
       setShowSettingsCta(false);
       setReplaceApplied(false);
-      await resizeActionBarWindow(540, 320);
+      await resizeActionBarWindow(PANEL_WINDOW_WIDTH, 348);
     } finally {
       setLoading(null);
       await invoke("set_actionbar_busy", { busy: false });
@@ -582,10 +629,26 @@ export default function ActionBar() {
     <div
       style={{
         display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "center",
+        width: "100%",
+        height: "100%",
+        background: "transparent",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        ref={contentRef}
+        style={{
+        display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
-        height: "100vh",
+        justifyContent: "flex-start",
+        gap: 8,
+        width: "fit-content",
+        maxWidth: "100%",
+        padding: "28px 16px 18px",
+        boxSizing: "border-box",
         background: "transparent",
         overflow: "visible",
       }}
@@ -607,8 +670,8 @@ export default function ActionBar() {
           background: "linear-gradient(180deg, rgba(255,255,255,0.9), rgba(255,255,255,0.76))",
           backdropFilter: "blur(16px)",
           WebkitBackdropFilter: "blur(16px)",
-          border: "1px solid rgba(255,255,255,0.72)",
-          boxShadow: "0 18px 34px rgba(15,23,42,0.12), 0 4px 10px rgba(15,23,42,0.08)",
+          border: "1px solid rgba(255,255,255,0.78)",
+          boxShadow: "0 10px 22px rgba(15,23,42,0.09), 0 2px 6px rgba(15,23,42,0.05)",
         }}
       >
         {actions.map((a) => (
@@ -632,7 +695,6 @@ export default function ActionBar() {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
           style={{
-            marginTop: 8,
             width: 504,
             maxWidth: "96vw",
             padding: "16px 16px 14px",
@@ -821,7 +883,6 @@ export default function ActionBar() {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
           style={{
-            marginTop: 8,
             width: 512,
             maxWidth: "96vw",
             padding: "16px 16px 14px",
@@ -1016,6 +1077,7 @@ export default function ActionBar() {
         </motion.div>
       )}
 
+      </div>
     </div>
   );
 }
@@ -1063,6 +1125,139 @@ function composerTabStyle(active: boolean): CSSProperties {
     fontSize: 12,
     fontWeight: 600,
     cursor: "pointer",
+  };
+}
+
+function primaryButtonStyle(background = "var(--accent)"): CSSProperties {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "8px 14px",
+    borderRadius: 10,
+    border: "none",
+    background,
+    color: "white",
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+    boxShadow: "0 8px 18px rgba(15,23,42,0.12)",
+  };
+}
+
+function secondaryButtonStyle(): CSSProperties {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "8px 13px",
+    borderRadius: 10,
+    border: "1px solid rgba(148,163,184,0.2)",
+    background: "rgba(255,255,255,0.82)",
+    color: "var(--fg)",
+    fontSize: 13,
+    fontWeight: 500,
+    cursor: "pointer",
+  };
+}
+
+function selectedTextToggleStyle(open: boolean): CSSProperties {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "7px 11px",
+    borderRadius: 999,
+    border: "1px solid rgba(148,163,184,0.16)",
+    background: open ? "rgba(226,232,240,0.68)" : "rgba(255,255,255,0.72)",
+    color: "var(--muted)",
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: "pointer",
+  };
+}
+
+function resultBadgeLabel(kind: ResultKind): string {
+  switch (kind) {
+    case "answer":
+      return "Ask AI";
+    case "rewrite":
+      return "Rewrite";
+    case "status":
+      return "Applied";
+    case "error":
+      return "Issue";
+    default:
+      return "Result";
+  }
+}
+
+function resultBadgeStyle(kind: ResultKind, tone: ResultTone): CSSProperties {
+  const palette =
+    tone === "error"
+      ? { bg: "rgba(220,38,38,0.12)", fg: "#b91c1c" }
+      : tone === "success"
+      ? { bg: "rgba(22,163,74,0.12)", fg: "#15803d" }
+      : kind === "answer"
+      ? { bg: "rgba(14,165,233,0.12)", fg: "#0369a1" }
+      : { bg: "rgba(59,130,246,0.12)", fg: "var(--accent)" };
+
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "4px 9px",
+    borderRadius: 999,
+    background: palette.bg,
+    color: palette.fg,
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: "0.03em",
+  };
+}
+
+function capabilityBadgeLabel(
+  kind: ResultKind,
+  canReplace: boolean,
+  replaceApplied: boolean,
+  isError: boolean
+): string {
+  if (isError) {
+    return "Needs attention";
+  }
+  if (replaceApplied) {
+    return "Undo available";
+  }
+  if (kind === "answer") {
+    return "Copy only";
+  }
+  return canReplace ? "Replace available" : "Copy only";
+}
+
+function capabilityBadgeStyle(
+  kind: ResultKind,
+  canReplace: boolean,
+  replaceApplied: boolean,
+  isError: boolean
+): CSSProperties {
+  const label = capabilityBadgeLabel(kind, canReplace, replaceApplied, isError);
+  const palette =
+    label === "Replace available"
+      ? { bg: "rgba(22,163,74,0.1)", fg: "#15803d" }
+      : label === "Undo available"
+      ? { bg: "rgba(15,23,42,0.08)", fg: "#111827" }
+      : label === "Needs attention"
+      ? { bg: "rgba(220,38,38,0.08)", fg: "#b91c1c" }
+      : { bg: "rgba(148,163,184,0.14)", fg: "var(--muted)" };
+
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "4px 9px",
+    borderRadius: 999,
+    background: palette.bg,
+    color: palette.fg,
+    fontSize: 11,
+    fontWeight: 700,
   };
 }
 

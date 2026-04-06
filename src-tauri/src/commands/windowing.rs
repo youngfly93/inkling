@@ -65,12 +65,16 @@ pub fn open_library(app: &AppHandle) {
 }
 
 const ACTIONBAR_LABEL: &str = "actionbar";
+const ACTIONBAR_WINDOW_WIDTH: f64 = 472.0;
+const ACTIONBAR_WINDOW_HEIGHT: f64 = 124.0;
 
-fn configure_actionbar_panel(_win: &WebviewWindow) {}
+fn configure_actionbar_panel(win: &WebviewWindow) {
+    let _ = win.set_shadow(false);
+}
 
 fn calc_position(app: &AppHandle, snapshot: &SelectionSnapshot) -> (f64, f64) {
-    let dock_w = 430.0;
-    let dock_h = 88.0;
+    let dock_w = ACTIONBAR_WINDOW_WIDTH;
+    let dock_h = ACTIONBAR_WINDOW_HEIGHT;
     let margin = 8.0;
 
     let cursor = app
@@ -117,8 +121,9 @@ pub fn open_action_bar(app: &AppHandle, snapshot: &SelectionSnapshot) {
     eprintln!("Creating action bar at ({}, {})", x, y);
     let win_result = WebviewWindowBuilder::new(app, ACTIONBAR_LABEL, WebviewUrl::App("/#/actionbar".into()))
         .title("Seleany")
-        .inner_size(430.0, 88.0)
+        .inner_size(ACTIONBAR_WINDOW_WIDTH, ACTIONBAR_WINDOW_HEIGHT)
         .decorations(false)
+        .shadow(false)
         .always_on_top(true)
         .visible_on_all_workspaces(true)
         .resizable(false)
