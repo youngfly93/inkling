@@ -17,6 +17,8 @@ struct SelectionSnapshot: Encodable {
     let method: String
     let mouseX: Double
     let mouseY: Double
+    let anchorX: Double?
+    let anchorY: Double?
 }
 
 struct ReplaceResult: Encodable {
@@ -42,6 +44,7 @@ struct AXSelectionContext {
     let text: String
     let editable: Bool
     let range: NSRange
+    let bounds: CGRect?
 }
 
 enum ReplaceError: String, Error {
@@ -111,7 +114,9 @@ func runMonitor() {
                 editable: false,
                 method: "clear",
                 mouseX: mousePos.x,
-                mouseY: screenHeight - mousePos.y
+                mouseY: screenHeight - mousePos.y,
+                anchorX: nil,
+                anchorY: nil
             )
         )
         fflush(stdout)
@@ -479,6 +484,12 @@ func getSelectionViaAX(pid: pid_t, bundleID: String, appName: String, mousePos: 
 
     // Convert mouse position: NSEvent uses bottom-left origin, we want top-left
     let screenHeight = NSScreen.main?.frame.height ?? 900
+    let mouseTopLeft = CGPoint(x: mousePos.x, y: screenHeight - mousePos.y)
+    let resolvedAnchor =
+        bundleID == "notion.id"
+        ? Optional(mouseTopLeft)
+        : selectionAnchor(for: selection, mousePos: mousePos)
+
     return SelectionSnapshot(
         text: selection.text,
         app: bundleID,
@@ -487,7 +498,9 @@ func getSelectionViaAX(pid: pid_t, bundleID: String, appName: String, mousePos: 
         editable: selection.editable,
         method: "ax",
         mouseX: mousePos.x,
-        mouseY: screenHeight - mousePos.y
+        mouseY: screenHeight - mousePos.y,
+        anchorX: resolvedAnchor.map { Double($0.x) },
+        anchorY: resolvedAnchor.map { Double($0.y) }
     )
 }
 
@@ -517,8 +530,45 @@ func getAXSelectionContext(app: NSRunningApplication) -> AXSelectionContext? {
         element: element,
         text: selectionText,
         editable: isEditable(element: element),
-        range: selectionRange
+        range: selectionRange,
+        bounds: boundsForRange(element: element, range: selectionRange)
     )
+}
+
+func selectionAnchor(for selection: AXSelectionContext, mousePos: NSPoint) -> CGPoint? {
+    guard let bounds = selection.bounds else {
+        return nil
+    }
+
+    let screenHeight = NSScreen.main?.frame.height ?? 900
+    let mouseTopLeft = CGPoint(x: mousePos.x, y: screenHeight - mousePos.y)
+    var candidates = [CGPoint(x: bounds.maxX, y: bounds.maxY)]
+    if let elementFrame = frameForElement(selection.element) {
+        candidates.append(
+            CGPoint(
+                x: elementFrame.minX + bounds.maxX,
+                y: elementFrame.minY + bounds.maxY
+            )
+        )
+    }
+    if let windowFrame = windowFrameForElement(selection.element) {
+        candidates.append(
+            CGPoint(
+                x: windowFrame.minX + bounds.maxX,
+                y: windowFrame.minY + bounds.maxY
+            )
+        )
+    }
+
+    return candidates.min { lhs, rhs in
+        squaredDistance(from: lhs, to: mouseTopLeft) < squaredDistance(from: rhs, to: mouseTopLeft)
+    }
+}
+
+func squaredDistance(from lhs: CGPoint, to rhs: CGPoint) -> CGFloat {
+    let dx = lhs.x - rhs.x
+    let dy = lhs.y - rhs.y
+    return (dx * dx) + (dy * dy)
 }
 
 func focusedElement(for appElement: AXUIElement) -> AXUIElement? {
@@ -605,6 +655,45 @@ func boolAttribute(element: AXUIElement, attribute: String) -> Bool? {
     return nil
 }
 
+func pointAttribute(element: AXUIElement, attribute: String) -> CGPoint? {
+    var value: CFTypeRef?
+    let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
+    guard result == .success, let value else {
+        return nil
+    }
+
+    return cgPoint(from: value)
+}
+
+func sizeAttribute(element: AXUIElement, attribute: String) -> CGSize? {
+    var value: CFTypeRef?
+    let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
+    guard result == .success, let value else {
+        return nil
+    }
+
+    return cgSize(from: value)
+}
+
+func frameForElement(_ element: AXUIElement) -> CGRect? {
+    guard let origin = pointAttribute(element: element, attribute: kAXPositionAttribute as String),
+          let size = sizeAttribute(element: element, attribute: kAXSizeAttribute as String) else {
+        return nil
+    }
+
+    return CGRect(origin: origin, size: size)
+}
+
+func windowFrameForElement(_ element: AXUIElement) -> CGRect? {
+    var value: CFTypeRef?
+    let result = AXUIElementCopyAttributeValue(element, kAXWindowAttribute as CFString, &value)
+    guard result == .success, let value else {
+        return nil
+    }
+
+    return frameForElement(value as! AXUIElement)
+}
+
 func rangeAttribute(element: AXUIElement, attribute: String) -> NSRange? {
     var value: CFTypeRef?
     let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
@@ -663,6 +752,80 @@ func parameterizedStringAttribute(element: AXUIElement, range: NSRange) -> Strin
     }
 
     return value as? String
+}
+
+func boundsForRange(element: AXUIElement, range: NSRange) -> CGRect? {
+    var rawRange = CFRange(location: range.location, length: range.length)
+    guard let rangeValue = AXValueCreate(.cfRange, &rawRange) else {
+        return nil
+    }
+
+    var value: CFTypeRef?
+    let result = AXUIElementCopyParameterizedAttributeValue(
+        element,
+        kAXBoundsForRangeParameterizedAttribute as CFString,
+        rangeValue,
+        &value
+    )
+    guard result == .success, let value else {
+        return nil
+    }
+
+    return cgRect(from: value)
+}
+
+func cgRect(from value: CFTypeRef) -> CGRect? {
+    guard CFGetTypeID(value) == AXValueGetTypeID() else {
+        return nil
+    }
+
+    let axValue = value as! AXValue
+    guard AXValueGetType(axValue) == .cgRect else {
+        return nil
+    }
+
+    var rect = CGRect.zero
+    guard AXValueGetValue(axValue, .cgRect, &rect) else {
+        return nil
+    }
+
+    return rect
+}
+
+func cgPoint(from value: CFTypeRef) -> CGPoint? {
+    guard CFGetTypeID(value) == AXValueGetTypeID() else {
+        return nil
+    }
+
+    let axValue = value as! AXValue
+    guard AXValueGetType(axValue) == .cgPoint else {
+        return nil
+    }
+
+    var point = CGPoint.zero
+    guard AXValueGetValue(axValue, .cgPoint, &point) else {
+        return nil
+    }
+
+    return point
+}
+
+func cgSize(from value: CFTypeRef) -> CGSize? {
+    guard CFGetTypeID(value) == AXValueGetTypeID() else {
+        return nil
+    }
+
+    let axValue = value as! AXValue
+    guard AXValueGetType(axValue) == .cgSize else {
+        return nil
+    }
+
+    var size = CGSize.zero
+    guard AXValueGetValue(axValue, .cgSize, &size) else {
+        return nil
+    }
+
+    return size
 }
 
 // MARK: - Browser AppleScript
@@ -725,7 +888,9 @@ func getSelectionViaBrowser(bundleID: String, appName: String, mousePos: NSPoint
         editable: false,
         method: "applescript",
         mouseX: mousePos.x,
-        mouseY: screenHeight - mousePos.y
+        mouseY: screenHeight - mousePos.y,
+        anchorX: nil,
+        anchorY: nil
     )
 }
 

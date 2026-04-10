@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{
-    AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 
 use super::selection::SelectionSnapshot;
@@ -77,8 +77,10 @@ pub fn open_library(app: &AppHandle) {
 }
 
 const ACTIONBAR_LABEL: &str = "actionbar";
-const ACTIONBAR_WINDOW_WIDTH: f64 = 420.0;
-const ACTIONBAR_WINDOW_HEIGHT: f64 = 106.0;
+const ACTIONBAR_WINDOW_WIDTH: f64 = 18.0;
+const ACTIONBAR_WINDOW_HEIGHT: f64 = 18.0;
+const POINTER_FOLLOW_OFFSET_X: f64 = 6.0;
+const POINTER_FOLLOW_OFFSET_Y: f64 = 6.0;
 
 fn configure_actionbar_panel(win: &WebviewWindow) {
     let _ = win.set_shadow(false);
@@ -101,9 +103,17 @@ fn calc_position(app: &AppHandle, snapshot: &SelectionSnapshot) -> (f64, f64) {
     let cursor = app
         .cursor_position()
         .unwrap_or_else(|_| PhysicalPosition::new(snapshot.mouse_x, snapshot.mouse_y));
+    let anchor = if snapshot.app == "notion.id" {
+        (cursor.x, cursor.y)
+    } else {
+        snapshot
+            .anchor_x
+            .zip(snapshot.anchor_y)
+            .unwrap_or((cursor.x, cursor.y))
+    };
 
     let (work_x, work_y, work_w, work_h) = app
-        .monitor_from_point(cursor.x, cursor.y)
+        .monitor_from_point(anchor.0, anchor.1)
         .ok()
         .flatten()
         .or_else(|| app.primary_monitor().ok().flatten())
@@ -113,8 +123,16 @@ fn calc_position(app: &AppHandle, snapshot: &SelectionSnapshot) -> (f64, f64) {
         })
         .unwrap_or((0.0, 0.0, 1440.0, 900.0));
 
-    let x = (cursor.x - dock_w / 2.0).clamp(work_x + margin, (work_x + work_w - dock_w - margin).max(work_x + margin));
-    let y = (cursor.y + 20.0).clamp(work_y + margin, (work_y + work_h - dock_h - margin).max(work_y + margin));
+    let (base_x, base_y) = if snapshot.app == "notion.id" {
+        (cursor.x + POINTER_FOLLOW_OFFSET_X, cursor.y + POINTER_FOLLOW_OFFSET_Y)
+    } else if let Some((anchor_x, anchor_y)) = snapshot.anchor_x.zip(snapshot.anchor_y) {
+        (anchor_x - dock_w, anchor_y - dock_h)
+    } else {
+        (cursor.x + 8.0, cursor.y + 8.0)
+    };
+
+    let x = base_x.clamp(work_x + margin, (work_x + work_w - dock_w - margin).max(work_x + margin));
+    let y = base_y.clamp(work_y + margin, (work_y + work_h - dock_h - margin).max(work_y + margin));
     (x, y)
 }
 
@@ -129,6 +147,7 @@ pub fn open_action_bar(app: &AppHandle, snapshot: &SelectionSnapshot) {
     // Reuse existing window — just move and show
     if let Some(win) = app.get_webview_window(ACTIONBAR_LABEL) {
         configure_actionbar_panel(&win);
+        let _ = win.set_size(LogicalSize::new(ACTIONBAR_WINDOW_WIDTH, ACTIONBAR_WINDOW_HEIGHT));
         let _ = win.set_position(PhysicalPosition::new(x, y));
         let _ = win.set_ignore_cursor_events(false);
         let _ = win.set_focusable(true);

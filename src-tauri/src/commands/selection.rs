@@ -22,6 +22,10 @@ pub struct SelectionSnapshot {
     pub mouse_x: f64,
     #[serde(rename = "mouseY")]
     pub mouse_y: f64,
+    #[serde(rename = "anchorX")]
+    pub anchor_x: Option<f64>,
+    #[serde(rename = "anchorY")]
+    pub anchor_y: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]

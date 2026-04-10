@@ -34,5 +34,5 @@ futures = "0.3"
 urlencoding = "2"
 cocoa = "0.26"
 objc = "0.2"
+image = { version = "0.25", default-features = false, features = ["png"] }
 # core-graphics = "0.24"
-

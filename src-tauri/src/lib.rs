@@ -3,6 +3,7 @@ mod commands;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{
+    image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{TrayIcon, TrayIconBuilder},
     ActivationPolicy,
@@ -14,6 +15,17 @@ use tauri::{
 static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
 
 struct AppTray<R: tauri::Runtime>(TrayIcon<R>);
+
+fn load_tray_icon() -> tauri::Result<Image<'static>> {
+    let decoded = image::load_from_memory_with_format(
+        include_bytes!("../icons/trayTemplate.png"),
+        image::ImageFormat::Png,
+    )
+    .map_err(|error| std::io::Error::other(format!("tray icon decode failed: {error}")))?;
+    let rgba = decoded.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    Ok(Image::new_owned(rgba.into_raw(), width, height))
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -70,8 +82,10 @@ pub fn run() {
                 .item(&quit_item)
                 .build()?;
 
+            let tray_icon = load_tray_icon()?;
+
             let tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(tray_icon)
                 .icon_as_template(true)
                 .menu(&menu)
                 .on_menu_event(move |app, event| match event.id().as_ref() {

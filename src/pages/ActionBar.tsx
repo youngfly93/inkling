@@ -23,11 +23,15 @@ import { saveSentence as dbSave, saveTransform } from "../services/db";
 const DOCK_SIZE = 36;
 const DOCK_MAGNIFICATION = 62;
 const DOCK_DISTANCE = 150;
+const ORB_WINDOW_WIDTH = 18;
+const ORB_WINDOW_HEIGHT = 18;
 const DOCK_WINDOW_WIDTH = 420;
 const DOCK_WINDOW_HEIGHT = 106;
 const PANEL_WINDOW_WIDTH = 576;
 const WINDOW_SHADOW_BLEED_X = 18;
 const WINDOW_SHADOW_BLEED_Y = 20;
+const ORB_SHADOW_BLEED_X = 4;
+const ORB_SHADOW_BLEED_Y = 4;
 
 interface Selection {
   text: string;
@@ -37,6 +41,8 @@ interface Selection {
   editable: boolean;
   mouseX?: number;
   mouseY?: number;
+  anchorX?: number;
+  anchorY?: number;
 }
 
 interface CursorPosition {
@@ -54,6 +60,7 @@ interface DockAction {
 type ResultTone = "neutral" | "success" | "warning" | "error";
 type ComposerMode = "ask" | "improve";
 type ResultKind = "rewrite" | "answer" | "error" | "status";
+type SurfaceMode = "orb" | "dock";
 
 export default function ActionBar() {
   const [sel, setSel] = useState<Selection>({ text: "", app: "", url: "", editable: false });
@@ -71,6 +78,8 @@ export default function ActionBar() {
   const [resultCanReplace, setResultCanReplace] = useState(false);
   const [resultKind, setResultKind] = useState<ResultKind>("rewrite");
   const [showSelectedText, setShowSelectedText] = useState(false);
+  const [surfaceMode, setSurfaceMode] = useState<SurfaceMode>("orb");
+  const [orbHovered, setOrbHovered] = useState(false);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
   const dockItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -94,7 +103,9 @@ export default function ActionBar() {
     invoke<Selection>("get_current_selection")
       .then((selection) => {
         setSel(selection);
-        void syncDockHoverFromSelection(selection);
+        setSurfaceMode("orb");
+        setOrbHovered(false);
+        clearDockHover();
       })
       .catch((e) => console.error("Failed to get selection:", e));
 
@@ -115,8 +126,10 @@ export default function ActionBar() {
       setResultCanReplace(false);
       setResultKind("rewrite");
       setShowSelectedText(false);
-      void resizeActionBarWindow(DOCK_WINDOW_WIDTH, DOCK_WINDOW_HEIGHT)
-        .then(() => syncDockHoverFromSelection(event.payload));
+      setSurfaceMode("orb");
+      setOrbHovered(false);
+      clearDockHover();
+      void resizeActionBarWindow(ORB_WINDOW_WIDTH, ORB_WINDOW_HEIGHT);
     });
 
     return () => {
@@ -143,9 +156,41 @@ export default function ActionBar() {
     return () => window.clearTimeout(id);
   }, [composerMode]);
 
-  async function resizeActionBarWindow(width: number, height: number) {
-    const { LogicalSize } = await import("@tauri-apps/api/dpi");
-    await getCurrentWindow().setSize(new LogicalSize(width, height));
+  async function resizeActionBarWindow(
+    width: number,
+    height: number,
+    options?: { anchor?: "center" | "bottom-left" }
+  ) {
+    const win = getCurrentWindow();
+    const { LogicalSize, PhysicalPosition } = await import("@tauri-apps/api/dpi");
+
+    if (options?.anchor === "center" || options?.anchor === "bottom-left") {
+      const [outerPos, innerSize, scaleFactor] = await Promise.all([
+        win.outerPosition(),
+        win.innerSize(),
+        win.scaleFactor(),
+      ]);
+      const currentLogical = innerSize.toLogical(scaleFactor);
+      const deltaX =
+        options.anchor === "center"
+          ? ((width - currentLogical.width) * scaleFactor) / 2
+          : 0;
+      const deltaY =
+        options.anchor === "center"
+          ? ((height - currentLogical.height) * scaleFactor) / 2
+          : (height - currentLogical.height) * scaleFactor;
+
+      await win.setSize(new LogicalSize(width, height));
+      await win.setPosition(
+        new PhysicalPosition(
+          Math.round(outerPos.x - deltaX),
+          Math.round(outerPos.y - deltaY)
+        )
+      );
+      return;
+    }
+
+    await win.setSize(new LogicalSize(width, height));
   }
 
   function setDockItemRef(id: string, node: HTMLButtonElement | null) {
@@ -238,8 +283,14 @@ export default function ActionBar() {
     let frame = 0;
 
     const syncWindowToContent = () => {
-      const width = Math.ceil(node.scrollWidth + WINDOW_SHADOW_BLEED_X);
-      const height = Math.ceil(node.scrollHeight + WINDOW_SHADOW_BLEED_Y);
+      const bleedX = surfaceMode === "orb" && !composerMode && !result
+        ? ORB_SHADOW_BLEED_X
+        : WINDOW_SHADOW_BLEED_X;
+      const bleedY = surfaceMode === "orb" && !composerMode && !result
+        ? ORB_SHADOW_BLEED_Y
+        : WINDOW_SHADOW_BLEED_Y;
+      const width = Math.ceil(node.scrollWidth + bleedX);
+      const height = Math.ceil(node.scrollHeight + bleedY);
       const last = lastMeasuredWindowSize.current;
 
       if (last && Math.abs(last.width - width) < 2 && Math.abs(last.height - height) < 2) {
@@ -247,7 +298,7 @@ export default function ActionBar() {
       }
 
       lastMeasuredWindowSize.current = { width, height };
-      void resizeActionBarWindow(width, height);
+      void resizeActionBarWindow(width, height, { anchor: "bottom-left" });
     };
 
     const scheduleSync = () => {
@@ -267,10 +318,10 @@ export default function ActionBar() {
       observer.disconnect();
       window.cancelAnimationFrame(frame);
     };
-  }, [composerMode, result, resultTitle, resultTone, showSelectedText, statusMessage, showSettingsCta, replaceApplied, loading]);
+  }, [surfaceMode, composerMode, result, resultTitle, resultTone, showSelectedText, statusMessage, showSettingsCta, replaceApplied, loading]);
 
   useEffect(() => {
-    if (composerMode || result) {
+    if (surfaceMode !== "dock" || composerMode || result) {
       clearDockHover();
       return;
     }
@@ -315,7 +366,19 @@ export default function ActionBar() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [composerMode, result]);
+  }, [surfaceMode, composerMode, result]);
+
+  useEffect(() => {
+    if (surfaceMode !== "orb" || orbHovered || loading || composerMode || result || !sel.text.trim()) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void getCurrentWindow().hide();
+    }, 5000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [surfaceMode, orbHovered, loading, composerMode, result, sel.text]);
 
   async function revealPanel({
     title,
@@ -336,6 +399,8 @@ export default function ActionBar() {
     canReplace?: boolean;
     kind?: ResultKind;
   }) {
+    setSurfaceMode("dock");
+    setOrbHovered(false);
     setResultTitle(title);
     setResult(body);
     setResultTone(tone);
@@ -345,7 +410,7 @@ export default function ActionBar() {
     setResultKind(kind);
     setShowSelectedText(false);
     setComposerMode(null);
-    await resizeActionBarWindow(PANEL_WINDOW_WIDTH, height);
+    await resizeActionBarWindow(PANEL_WINDOW_WIDTH, height, { anchor: "bottom-left" });
     await getCurrentWindow().show();
   }
 
@@ -361,11 +426,23 @@ export default function ActionBar() {
     setShowSelectedText(false);
   }
 
-  async function collapseToDock() {
+  async function expandDock() {
+    setSurfaceMode("dock");
+    setOrbHovered(false);
+    await resizeActionBarWindow(DOCK_WINDOW_WIDTH, DOCK_WINDOW_HEIGHT, { anchor: "bottom-left" });
+    await getCurrentWindow().show();
+    await syncDockHoverFromSelection(sel);
+  }
+
+  async function collapseToOrb() {
     setComposerMode(null);
     setComposerPrompt("");
     resetInlinePanels();
-    await resizeActionBarWindow(DOCK_WINDOW_WIDTH, DOCK_WINDOW_HEIGHT);
+    clearDockHover();
+    setOrbHovered(false);
+    setSurfaceMode("orb");
+    await resizeActionBarWindow(ORB_WINDOW_WIDTH, ORB_WINDOW_HEIGHT, { anchor: "bottom-left" });
+    await getCurrentWindow().show();
   }
 
   async function loadAIConfig() {
@@ -387,18 +464,21 @@ export default function ActionBar() {
   }
 
   async function openComposer(mode: ComposerMode) {
+    setSurfaceMode("dock");
+    setOrbHovered(false);
     setComposerMode(mode);
     setComposerPrompt("");
     setCopied(false);
     resetInlinePanels();
     setStatusMessage(null);
-    await resizeActionBarWindow(PANEL_WINDOW_WIDTH, 286);
+    await resizeActionBarWindow(PANEL_WINDOW_WIDTH, 286, { anchor: "bottom-left" });
     await getCurrentWindow().show();
   }
 
   useEffect(() => {
     const onBlur = () => {
       setHoveredAction(null);
+      setOrbHovered(false);
       mouseX.set(Infinity);
     };
     const onKey = (e: KeyboardEvent) => {
@@ -406,8 +486,8 @@ export default function ActionBar() {
 
       if (key === "escape") {
         e.preventDefault();
-        if (composerMode) {
-          void collapseToDock();
+        if (composerMode || result || surfaceMode === "dock") {
+          void collapseToOrb();
         } else {
           void getCurrentWindow().hide();
         }
@@ -469,7 +549,7 @@ export default function ActionBar() {
       window.removeEventListener("blur", onBlur);
       window.removeEventListener("keydown", onKey);
     };
-  }, [composerMode, composerPrompt, isErrorResult, loading, replaceApplied, result, resultCanReplace]);
+  }, [composerMode, composerPrompt, isErrorResult, loading, replaceApplied, result, resultCanReplace, surfaceMode]);
 
   async function runAI(actionId: string) {
     setLoading(actionId);
@@ -688,7 +768,7 @@ export default function ActionBar() {
       setStatusMessage(friendly.status);
       setShowSettingsCta(false);
       setReplaceApplied(false);
-      await resizeActionBarWindow(PANEL_WINDOW_WIDTH, 348);
+      await resizeActionBarWindow(PANEL_WINDOW_WIDTH, 348, { anchor: "bottom-left" });
     } finally {
       setLoading(null);
       await invoke("set_actionbar_busy", { busy: false });
@@ -781,55 +861,86 @@ export default function ActionBar() {
       <div
         ref={contentRef}
         style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "flex-start",
-        gap: 8,
-        width: "fit-content",
-        maxWidth: "100%",
-        padding: "22px 14px 14px",
-        boxSizing: "border-box",
-        background: "transparent",
-        overflow: "visible",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "flex-start",
+          gap: 8,
+          width: "fit-content",
+          maxWidth: "100%",
+          padding:
+            surfaceMode === "orb" && !composerMode && !result
+              ? "0"
+              : "22px 14px 14px",
+          boxSizing: "border-box",
+          background: "transparent",
+          overflow: "visible",
       }}
     >
-      {/* Dock bar */}
-      <motion.div
-        ref={dockRef}
-        className="dock-container"
-        onMouseMove={(event) => syncDockHoverFromClientPoint(event.clientX, event.clientY)}
-        onMouseEnter={(event) => syncDockHoverFromClientPoint(event.clientX, event.clientY)}
-        onMouseLeave={clearDockHover}
-        style={{
-          display: "flex",
-          alignItems: "flex-end",
-          gap: 8,
-          padding: "6px 10px 8px",
-          borderRadius: 22,
-          background: "linear-gradient(180deg, rgba(255,255,255,0.985), rgba(248,250,252,0.96))",
-          backdropFilter: "blur(14px)",
-          WebkitBackdropFilter: "blur(14px)",
-          border: "1px solid rgba(226,232,240,0.96)",
-          boxShadow: "0 14px 28px rgba(15,23,42,0.08), inset 0 1px 0 rgba(255,255,255,0.94)",
-        }}
-      >
-        {actions.map((a) => (
-          <DockIcon
-            key={a.id}
-            id={a.id}
-            mouseX={mouseX}
-            label={a.label}
-            hovered={hoveredAction === a.id}
-            isLoading={loading === a.id}
-            onHoverChange={(next) => setHoveredAction(next ? a.id : null)}
-            setButtonRef={setDockItemRef}
-            onClick={a.action}
-          >
-            {a.icon}
-          </DockIcon>
-        ))}
-      </motion.div>
+      {!composerMode && !result && surfaceMode === "orb" ? (
+        <motion.button
+          type="button"
+          initial={{ opacity: 0, scale: 0.84 }}
+          animate={{ opacity: 1, scale: orbHovered ? 1.08 : 1 }}
+          transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+          onMouseEnter={() => setOrbHovered(true)}
+          onMouseLeave={() => setOrbHovered(false)}
+          onClick={() => {
+            void expandDock();
+          }}
+          style={{
+            position: "relative",
+            width: 10,
+            height: 10,
+            borderRadius: 999,
+            border: "none",
+            background: "#111827",
+            boxShadow: orbHovered
+              ? "0 4px 10px rgba(15,23,42,0.22)"
+              : "0 3px 8px rgba(15,23,42,0.18)",
+            cursor: "pointer",
+            padding: 0,
+            display: "grid",
+            placeItems: "center",
+          }}
+        />
+      ) : (
+        <motion.div
+          ref={dockRef}
+          className="dock-container"
+          onMouseMove={(event) => syncDockHoverFromClientPoint(event.clientX, event.clientY)}
+          onMouseEnter={(event) => syncDockHoverFromClientPoint(event.clientX, event.clientY)}
+          onMouseLeave={clearDockHover}
+          style={{
+            display: "flex",
+            alignItems: "flex-end",
+            gap: 8,
+            padding: "6px 10px 8px",
+            borderRadius: 22,
+            background: "linear-gradient(180deg, rgba(255,255,255,0.985), rgba(248,250,252,0.96))",
+            backdropFilter: "blur(14px)",
+            WebkitBackdropFilter: "blur(14px)",
+            border: "1px solid rgba(226,232,240,0.96)",
+            boxShadow: "0 14px 28px rgba(15,23,42,0.08), inset 0 1px 0 rgba(255,255,255,0.94)",
+          }}
+        >
+          {actions.map((a) => (
+            <DockIcon
+              key={a.id}
+              id={a.id}
+              mouseX={mouseX}
+              label={a.label}
+              hovered={hoveredAction === a.id}
+              isLoading={loading === a.id}
+              onHoverChange={(next) => setHoveredAction(next ? a.id : null)}
+              setButtonRef={setDockItemRef}
+              onClick={a.action}
+            >
+              {a.icon}
+            </DockIcon>
+          ))}
+        </motion.div>
+      )}
 
       {composerMode && !result && (
         <motion.div
@@ -997,7 +1108,7 @@ export default function ActionBar() {
               <button
                 type="button"
                 onClick={() => {
-                  void collapseToDock();
+                  void collapseToOrb();
                 }}
                 style={secondaryButtonStyle()}
               >
@@ -1189,7 +1300,7 @@ export default function ActionBar() {
               )}
               <button
                 onClick={() => {
-                  void collapseToDock();
+                  void collapseToOrb();
                 }}
                 style={secondaryButtonStyle()}
               >
