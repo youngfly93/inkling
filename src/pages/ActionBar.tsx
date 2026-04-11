@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, type CSSProperties } from "react";
+import React, { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
@@ -53,8 +53,12 @@ interface CursorPosition {
 interface DockAction {
   id: string;
   label: string;
+  shortcut: string;
   icon: React.ReactNode;
-  action: () => void;
+  /** Hex accent used when the icon is hovered/magnified. */
+  accent: string;
+  /** Semantic grouping — used to render the divider between AI and utility. */
+  group: "ai" | "util";
 }
 
 type ResultTone = "neutral" | "success" | "warning" | "error";
@@ -83,9 +87,17 @@ export default function ActionBar() {
   const contentRef = useRef<HTMLDivElement | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
   const dockItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  // Cached dock geometry — refreshed only on layout changes so the hover
+  // sync path never calls getBoundingClientRect per frame.
+  const dockMetricsRef = useRef<{
+    bounds: { left: number; right: number; top: number; bottom: number } | null;
+    items: Array<{ id: string; centerX: number }>;
+  }>({ bounds: null, items: [] });
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const lastMeasuredWindowSize = useRef<{ width: number; height: number } | null>(null);
-  const mouseX = useMotionValue(Infinity);
+  // -10000 keeps the spring math defined while sitting well outside any dock
+  // layout; Infinity produces NaN once the spring does subtraction against it.
+  const mouseX = useMotionValue(-10000);
   const text = sel.text;
   const app = sel.app;
   const url = sel.url;
@@ -156,6 +168,47 @@ export default function ActionBar() {
     return () => window.clearTimeout(id);
   }, [composerMode]);
 
+  // Refresh cached dock geometry whenever the dock is actually mounted
+  // (surfaceMode="dock") and on layout changes. We measure in the next frame
+  // so the initial measurement sees the final layout (after spring settles).
+  useEffect(() => {
+    if (surfaceMode !== "dock") {
+      dockMetricsRef.current = { bounds: null, items: [] };
+      return;
+    }
+    const dockNode = dockRef.current;
+    if (!dockNode) return;
+
+    let rafId = 0;
+    const schedule = () => {
+      if (rafId) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = 0;
+        recomputeDockMetrics();
+      });
+    };
+
+    // Initial measurement after the next paint — gives the dock time to
+    // render at its rest size before we read bounds.
+    schedule();
+
+    const ro = new ResizeObserver(schedule);
+    ro.observe(dockNode);
+    for (const node of Object.values(dockItemRefs.current)) {
+      if (node) ro.observe(node);
+    }
+
+    window.addEventListener("resize", schedule);
+    window.addEventListener("scroll", schedule, true);
+
+    return () => {
+      if (rafId) window.cancelAnimationFrame(rafId);
+      ro.disconnect();
+      window.removeEventListener("resize", schedule);
+      window.removeEventListener("scroll", schedule, true);
+    };
+  }, [surfaceMode, composerMode, result]);
+
   async function resizeActionBarWindow(
     width: number,
     height: number,
@@ -193,36 +246,64 @@ export default function ActionBar() {
     await win.setSize(new LogicalSize(width, height));
   }
 
-  function setDockItemRef(id: string, node: HTMLButtonElement | null) {
-    dockItemRefs.current[id] = node;
+  // Stable — DockIcon is memoized and would otherwise re-render every parent tick.
+  const setDockItemRef = useCallback(
+    (id: string, node: HTMLButtonElement | null) => {
+      dockItemRefs.current[id] = node;
+    },
+    []
+  );
+
+  // Refresh the cached dock bounds + each icon's rest-position center.
+  // Called from the ResizeObserver below and once after the dock expands.
+  function recomputeDockMetrics() {
+    const dockNode = dockRef.current;
+    if (!dockNode) {
+      dockMetricsRef.current = { bounds: null, items: [] };
+      return;
+    }
+    const rect = dockNode.getBoundingClientRect();
+    const items: Array<{ id: string; centerX: number }> = [];
+    for (const [id, node] of Object.entries(dockItemRefs.current)) {
+      if (!node) continue;
+      const b = node.getBoundingClientRect();
+      items.push({ id, centerX: b.x + b.width / 2 });
+    }
+    dockMetricsRef.current = {
+      bounds: {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+      },
+      items,
+    };
   }
 
   function clearDockHover() {
-    mouseX.set(Infinity);
+    // -Infinity would taint the spring with NaN; park it far to the left instead.
+    mouseX.set(-10000);
     setHoveredAction(null);
   }
 
   function syncDockHoverFromClientPoint(clientX: number, clientY: number) {
-    const dockNode = dockRef.current;
-    if (!dockNode) {
+    const metrics = dockMetricsRef.current;
+    const bounds = metrics.bounds;
+    if (!bounds) {
       clearDockHover();
       return;
     }
 
-    const dockBounds = dockNode.getBoundingClientRect();
-    const withinX = clientX >= dockBounds.left - 18 && clientX <= dockBounds.right + 18;
-    const withinY = clientY >= dockBounds.top - 10 && clientY <= dockBounds.bottom + 12;
+    const withinX = clientX >= bounds.left - 18 && clientX <= bounds.right + 18;
+    const withinY = clientY >= bounds.top - 10 && clientY <= bounds.bottom + 12;
 
     if (!withinX || !withinY) {
       clearDockHover();
       return;
     }
 
-    const entries = Object.entries(dockItemRefs.current).filter(
-      (entry): entry is [string, HTMLButtonElement] => !!entry[1]
-    );
-
-    if (!entries.length) {
+    const items = metrics.items;
+    if (!items.length) {
       mouseX.set(clientX);
       return;
     }
@@ -231,15 +312,12 @@ export default function ActionBar() {
     let nearestCenter = clientX;
     let nearestDistance = Number.POSITIVE_INFINITY;
 
-    for (const [id, node] of entries) {
-      const bounds = node.getBoundingClientRect();
-      const center = bounds.x + bounds.width / 2;
-      const distance = Math.abs(clientX - center);
-
+    for (const item of items) {
+      const distance = Math.abs(clientX - item.centerX);
       if (distance < nearestDistance) {
         nearestDistance = distance;
-        nearestCenter = center;
-        nearestId = id;
+        nearestCenter = item.centerX;
+        nearestId = item.id;
       }
     }
 
@@ -479,7 +557,7 @@ export default function ActionBar() {
     const onBlur = () => {
       setHoveredAction(null);
       setOrbHovered(false);
-      mouseX.set(Infinity);
+      mouseX.set(-10000);
     };
     const onKey = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
@@ -807,42 +885,75 @@ export default function ActionBar() {
     await getCurrentWindow().hide();
   }
 
+  // Stable dispatchers so DockIcon (React.memo) never re-renders from callback
+  // identity churn. The actual handlers live in a ref so we can call the latest
+  // closure without tracking every dependency.
+  const actionHandlersRef = useRef<Record<string, () => void>>({});
+  actionHandlersRef.current = {
+    to_english: () => runAI("to_english"),
+    to_chinese: () => runAI("to_chinese"),
+    expand: () => runAI("expand"),
+    custom_ai: () => openComposer("ask"),
+    save: () => void handleSave(),
+    copy: copyText,
+  };
+
+  const handleActionClick = useCallback((id: string) => {
+    actionHandlersRef.current[id]?.();
+  }, []);
+
+  const handleActionHover = useCallback((id: string, next: boolean) => {
+    setHoveredAction(next ? id : null);
+  }, []);
+
   const actions: DockAction[] = [
     {
       id: "to_english",
-      label: "1 To English",
+      label: "To English",
+      shortcut: "1",
+      accent: "#2563eb", // blue — language
+      group: "ai",
       icon: <Languages size={16} />,
-      action: () => runAI("to_english"),
     },
     {
       id: "to_chinese",
-      label: "2 To Chinese",
+      label: "To Chinese",
+      shortcut: "2",
+      accent: "#0891b2", // cyan — language
+      group: "ai",
       icon: <BookOpen size={16} />,
-      action: () => runAI("to_chinese"),
     },
     {
       id: "expand",
-      label: "3 Expand",
+      label: "Expand",
+      shortcut: "3",
+      accent: "#7c3aed", // violet — rewrite
+      group: "ai",
       icon: <Maximize2 size={16} />,
-      action: () => runAI("expand"),
     },
     {
       id: "custom_ai",
-      label: "4 Ask / Improve",
+      label: "Ask / Improve",
+      shortcut: "4",
+      accent: "#db2777", // pink — custom
+      group: "ai",
       icon: <MessageSquare size={16} />,
-      action: () => openComposer("ask"),
     },
     {
       id: "save",
-      label: "5 Save",
+      label: "Save",
+      shortcut: "5",
+      accent: "#d97706", // amber — persistence
+      group: "util",
       icon: <Bookmark size={16} />,
-      action: handleSave,
     },
     {
       id: "copy",
-      label: "6 Copy",
+      label: "Copy",
+      shortcut: "6",
+      accent: "#059669", // emerald — quick action
+      group: "util",
       icon: <Copy size={16} />,
-      action: copyText,
     },
   ];
 
@@ -943,21 +1054,41 @@ export default function ActionBar() {
             backfaceVisibility: "hidden",
           }}
         >
-          {actions.map((a) => (
-            <DockIcon
-              key={a.id}
-              id={a.id}
-              mouseX={mouseX}
-              label={a.label}
-              hovered={hoveredAction === a.id}
-              isLoading={loading === a.id}
-              onHoverChange={(next) => setHoveredAction(next ? a.id : null)}
-              setButtonRef={setDockItemRef}
-              onClick={a.action}
-            >
-              {a.icon}
-            </DockIcon>
-          ))}
+          {actions.map((a, idx) => {
+            const prev = actions[idx - 1];
+            const showDivider = !!prev && prev.group !== a.group;
+            return (
+              <React.Fragment key={a.id}>
+                {showDivider && (
+                  <div
+                    aria-hidden="true"
+                    style={{
+                      alignSelf: "center",
+                      width: 1,
+                      height: 18,
+                      margin: "0 2px",
+                      background:
+                        "linear-gradient(180deg, rgba(15,23,42,0.02), rgba(15,23,42,0.14), rgba(15,23,42,0.02))",
+                    }}
+                  />
+                )}
+                <DockIcon
+                  id={a.id}
+                  mouseX={mouseX}
+                  label={a.label}
+                  shortcut={a.shortcut}
+                  accent={a.accent}
+                  hovered={hoveredAction === a.id}
+                  isLoading={loading === a.id}
+                  onHoverChange={handleActionHover}
+                  setButtonRef={setDockItemRef}
+                  onClick={handleActionClick}
+                >
+                  {a.icon}
+                </DockIcon>
+              </React.Fragment>
+            );
+          })}
         </motion.div>
       )}
 
@@ -1630,6 +1761,8 @@ const DockIcon = React.memo(function DockIcon({
   mouseX,
   children,
   label,
+  shortcut,
+  accent,
   hovered,
   isLoading,
   onHoverChange,
@@ -1640,15 +1773,16 @@ const DockIcon = React.memo(function DockIcon({
   mouseX: MotionValue<number>;
   children: React.ReactNode;
   label: string;
+  shortcut: string;
+  accent: string;
   hovered: boolean;
   isLoading: boolean;
-  onHoverChange: (hovered: boolean) => void;
+  /** Stable dispatcher — receives the id so parent can keep one callback. */
+  onHoverChange: (id: string, hovered: boolean) => void;
   setButtonRef: (id: string, node: HTMLButtonElement | null) => void;
-  onClick: () => void;
+  onClick: (id: string) => void;
 }) {
   const ref = useRef<HTMLButtonElement | null>(null);
-  // Cache button center X so `useTransform` never forces a synchronous layout.
-  // We refresh on mount, resize, and when the dock container scrolls/moves.
   const centerXRef = useRef<number>(0);
 
   useEffect(() => {
@@ -1670,7 +1804,6 @@ const DockIcon = React.memo(function DockIcon({
   }, []);
 
   const distance = useTransform(mouseX, (value) => value - centerXRef.current);
-  // Single spring drives everything; lift/iconScale are pure transforms off it.
   const size = useSpring(
     useTransform(
       distance,
@@ -1684,12 +1817,10 @@ const DockIcon = React.memo(function DockIcon({
     }
   );
   const lift = useTransform(size, [DOCK_SIZE, DOCK_MAGNIFICATION], [0, -6]);
-  const iconScale = useTransform(size, [DOCK_SIZE, DOCK_MAGNIFICATION], [1, 1.1]);
+  const iconScale = useTransform(size, [DOCK_SIZE, DOCK_MAGNIFICATION], [1, 1.12]);
   const setMouseToCenter = () => {
     const bounds = ref.current?.getBoundingClientRect();
-    if (!bounds) {
-      return;
-    }
+    if (!bounds) return;
     mouseX.set(bounds.x + bounds.width / 2);
   };
 
@@ -1698,28 +1829,58 @@ const DockIcon = React.memo(function DockIcon({
       <AnimatePresence>
         {hovered && (
           <motion.div
-            initial={{ opacity: 0, y: 6, scale: 0.96 }}
+            initial={{ opacity: 0, y: 4, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 6, scale: 0.96 }}
-            transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
+            exit={{ opacity: 0, y: 4, scale: 0.96 }}
+            transition={{
+              type: "spring",
+              mass: 0.2,
+              stiffness: 420,
+              damping: 26,
+            }}
             style={{
               position: "absolute",
-              bottom: "calc(100% + 8px)",
+              bottom: "calc(100% + 10px)",
               left: "50%",
               transform: "translateX(-50%)",
-              padding: "4px 8px",
-              borderRadius: 9,
-              background: "rgba(17,24,39,0.94)",
-              color: "#f8fafc",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "4px 6px 4px 10px",
+              borderRadius: 10,
+              background: "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.94))",
+              backdropFilter: "blur(12px)",
+              WebkitBackdropFilter: "blur(12px)",
+              border: "1px solid rgba(226,232,240,0.95)",
+              color: "#111827",
               fontSize: 11,
               fontWeight: 600,
               whiteSpace: "nowrap",
               pointerEvents: "none",
               zIndex: 10,
-              boxShadow: "0 10px 18px rgba(15,23,42,0.18)",
+              boxShadow: "0 8px 18px rgba(15,23,42,0.12), inset 0 1px 0 rgba(255,255,255,0.9)",
             }}
           >
-            {label}
+            <span>{label}</span>
+            <kbd
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                minWidth: 14,
+                height: 14,
+                padding: "0 4px",
+                borderRadius: 4,
+                background: "rgba(15,23,42,0.08)",
+                color: "#475569",
+                fontSize: 9,
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                fontWeight: 700,
+                lineHeight: 1,
+              }}
+            >
+              {shortcut}
+            </kbd>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1730,25 +1891,28 @@ const DockIcon = React.memo(function DockIcon({
         }}
         type="button"
         className={`dock-icon ${hovered ? "dock-icon-hovered" : ""}`}
+        whileTap={{ scale: 0.9 }}
+        transition={{ type: "spring", mass: 0.15, stiffness: 600, damping: 22 }}
         style={{
           width: size,
           height: size,
           y: lift,
+          color: hovered ? accent : "var(--fg)",
+          borderColor: hovered ? `${accent}4d` : undefined, // ~30% alpha
           willChange: "width, height, transform",
           backfaceVisibility: "hidden",
         }}
         onMouseEnter={() => {
           setMouseToCenter();
-          onHoverChange(true);
+          onHoverChange(id, true);
         }}
         onMouseMove={(event) => {
           mouseX.set(event.clientX);
         }}
-        onMouseLeave={() => onHoverChange(false)}
+        onMouseLeave={() => onHoverChange(id, false)}
         aria-label={label}
-        title={label}
         data-dock-id={id}
-        onClick={onClick}
+        onClick={() => onClick(id)}
       >
         <motion.div
           style={{
