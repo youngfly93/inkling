@@ -260,7 +260,7 @@ pub fn start_monitor(app: &tauri::AppHandle) {
         let child = StdCommand::new(&bridge_path)
             .arg("--monitor")
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::inherit())
             .spawn();
 
         let mut child = match child {

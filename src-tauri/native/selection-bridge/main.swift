@@ -87,7 +87,28 @@ func runHealth() {
 
 // MARK: - Monitor mode
 
+func debugLog(_ msg: String) {
+    FileHandle.standardError.write(Data("[bridge-debug] \(msg)\n".utf8))
+}
+
+/// Get the height of the primary display (the one with the menu bar).
+/// NSScreen.main can return the key window's screen on multi-monitor setups,
+/// which gives wrong values. The primary screen is always at NSScreen origin (0,0).
+func primaryDisplayHeight() -> CGFloat {
+    if let primary = NSScreen.screens.first(where: { $0.frame.origin == .zero }) {
+        return primary.frame.height
+    }
+    return NSScreen.screens.first?.frame.height ?? NSScreen.main?.frame.height ?? 900
+}
+
+/// Convert AppKit point (bottom-left origin, primary screen) to
+/// Quartz/top-left origin used by Tauri window positions.
+func appKitToQuartz(_ point: NSPoint) -> CGPoint {
+    return CGPoint(x: point.x, y: primaryDisplayHeight() - point.y)
+}
+
 func runMonitor() {
+    debugLog("runMonitor() entered")
     var lastText = ""
     var lastAppBundleID = ""
     var hadSelection = false
@@ -122,7 +143,7 @@ func runMonitor() {
         fflush(stdout)
     }
 
-    func processSelection(forceRefreshSameSelection: Bool = false) {
+    func processSelection(forceRefreshSameSelection: Bool = false, allowClipboard: Bool = false, canClear: Bool = true, dragStart: NSPoint = .zero, dragEnd: NSPoint = .zero) {
         let frontApp = NSWorkspace.shared.frontmostApplication
         let bundleID = frontApp?.bundleIdentifier ?? ""
 
@@ -130,9 +151,11 @@ func runMonitor() {
             return
         }
 
-        if let snapshot = captureSelection() {
+        if let snapshot = captureSelection(allowClipboard: allowClipboard, dragStart: dragStart, dragEnd: dragEnd) {
             if snapshot.text.isEmpty {
-                emitClearIfNeeded(frontApp: frontApp, mousePos: NSEvent.mouseLocation)
+                if canClear {
+                    emitClearIfNeeded(frontApp: frontApp, mousePos: NSEvent.mouseLocation)
+                }
                 return
             }
 
@@ -150,21 +173,31 @@ func runMonitor() {
             lastAppBundleID = snapshot.app
             printJSON(snapshot)
             fflush(stdout)
-        } else {
+        } else if canClear {
             emitClearIfNeeded(frontApp: frontApp, mousePos: NSEvent.mouseLocation)
         }
+        // When canClear is false (timer), do nothing if capture fails —
+        // preserve existing selection state
     }
 
     var wasDragging = false
+    var dragStartPos = NSPoint.zero  // mouse position at drag start
+    var dragEndPos = NSPoint.zero    // mouse position at drag end (captured immediately)
 
     NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp, .rightMouseUp, .leftMouseDragged, .keyDown, .scrollWheel]) { event in
         if event.type == .leftMouseDown {
             wasDragging = false
+            dragStartPos = NSEvent.mouseLocation
             return
         }
         if event.type == .leftMouseDragged {
             wasDragging = true
             return
+        }
+
+        // Capture mouse position immediately at event time, before debounce delay
+        if event.type == .leftMouseUp && wasDragging {
+            dragEndPos = NSEvent.mouseLocation
         }
 
         let eventType = event.type
@@ -193,7 +226,14 @@ func runMonitor() {
                 return
             }
 
-            processSelection(forceRefreshSameSelection: eventType == .scrollWheel)
+            let isDragEnd = eventType == .leftMouseUp && wasDragging
+            processSelection(
+                forceRefreshSameSelection: eventType == .scrollWheel,
+                allowClipboard: isDragEnd,
+                canClear: false,  // only explicit click/right-click above should clear
+                dragStart: dragStartPos,
+                dragEnd: dragEndPos
+            )
         }
         debounceItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
@@ -213,14 +253,24 @@ func runMonitor() {
         emitClearIfNeeded(frontApp: frontApp, mousePos: NSEvent.mouseLocation)
     }
 
+    debugLog("Setting up timer...")
+    var tickCount = 0
     Timer.scheduledTimer(withTimeInterval: 0.45, repeats: true) { _ in
-        processSelection()
+        tickCount += 1
+        if tickCount % 5 == 1 {  // log every 5th tick to reduce noise
+            let frontApp = NSWorkspace.shared.frontmostApplication
+            let bundleID = frontApp?.bundleIdentifier ?? "nil"
+            debugLog("Timer tick #\(tickCount): frontApp=\(bundleID)")
+        }
+        processSelection(canClear: false)
     }
 
+    debugLog("Starting NSApplication run loop...")
     // NSEvent global monitors require an NSApplication run loop
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory) // no dock icon
     app.run()
+    debugLog("NSApplication.run() returned (unexpected)")
 }
 
 // MARK: - One-shot mode
@@ -292,8 +342,11 @@ func runUndo() {
 
 // MARK: - Selection capture
 
-func captureSelection() -> SelectionSnapshot? {
-    guard let frontApp = NSWorkspace.shared.frontmostApplication else { return nil }
+func captureSelection(allowClipboard: Bool = false, dragStart: NSPoint = .zero, dragEnd: NSPoint = .zero) -> SelectionSnapshot? {
+    guard let frontApp = NSWorkspace.shared.frontmostApplication else {
+        debugLog("captureSelection: no frontmost app")
+        return nil
+    }
 
     let bundleID = frontApp.bundleIdentifier ?? ""
     let appName = frontApp.localizedName ?? ""
@@ -302,8 +355,10 @@ func captureSelection() -> SelectionSnapshot? {
 
     // Try AX
     if let result = getSelectionViaAX(pid: pid, bundleID: bundleID, appName: appName, mousePos: mousePos) {
+        debugLog("captureSelection: AX success, \(result.text.count) chars")
         return result
     }
+    debugLog("captureSelection: AX failed for \(bundleID) pid=\(pid)")
 
     // Try AppleScript for browsers
     let browsers = [
@@ -316,6 +371,39 @@ func captureSelection() -> SelectionSnapshot? {
         if let result = getSelectionViaBrowser(bundleID: bundleID, appName: appName, mousePos: mousePos) {
             return result
         }
+    }
+
+    // Fallback: clipboard-based capture (simulate Cmd+C) — only on drag-end events
+    guard allowClipboard else { return nil }
+    debugLog("captureSelection: trying clipboard fallback")
+    if let text = getSelectionViaClipboard() {
+        // Convert drag bounding box right-bottom corner to top-left origin.
+        // In AppKit coords: min(y) is the BOTTOM of the box (lower Y = lower on screen).
+        let anchorAppKit = NSPoint(
+            x: max(dragStart.x, dragEnd.x),
+            y: min(dragStart.y, dragEnd.y)
+        )
+        let anchorQuartz = appKitToQuartz(anchorAppKit)
+        let mouseQuartz = appKitToQuartz(dragEnd)
+
+        debugLog("captureSelection: clipboard fallback success, \(text.count) chars, "
+            + "dragStart=(\(Int(dragStart.x)),\(Int(dragStart.y))) "
+            + "dragEnd=(\(Int(dragEnd.x)),\(Int(dragEnd.y))) "
+            + "anchor=(\(Int(anchorQuartz.x)),\(Int(anchorQuartz.y))) "
+            + "primaryH=\(Int(primaryDisplayHeight()))")
+
+        return SelectionSnapshot(
+            text: text,
+            app: bundleID,
+            appName: appName,
+            url: "",
+            editable: false,
+            method: "clipboard",
+            mouseX: mouseQuartz.x,
+            mouseY: mouseQuartz.y,
+            anchorX: anchorQuartz.x,
+            anchorY: anchorQuartz.y
+        )
     }
 
     return nil
@@ -462,6 +550,43 @@ func replaceSelectionViaPaste(
     return true
 }
 
+/// Capture selected text by simulating Cmd+C, reading clipboard, then restoring it
+func getSelectionViaClipboard() -> String? {
+    let pasteboard = NSPasteboard.general
+    let changeCount = pasteboard.changeCount
+    let previousString = pasteboard.string(forType: .string)
+
+    // Clear and simulate Cmd+C
+    pasteboard.clearContents()
+    sendCommandKey(keyCode: 8) // C key
+    usleep(80_000) // 80ms for copy to complete
+
+    // Check if clipboard changed
+    guard pasteboard.changeCount != changeCount else {
+        // Clipboard didn't change — copy failed or nothing selected
+        // Restore previous content
+        if let prev = previousString {
+            pasteboard.clearContents()
+            _ = pasteboard.setString(prev, forType: .string)
+        }
+        return nil
+    }
+
+    let copiedText = pasteboard.string(forType: .string)
+
+    // Restore previous clipboard
+    pasteboard.clearContents()
+    if let prev = previousString, !prev.isEmpty {
+        _ = pasteboard.setString(prev, forType: .string)
+    }
+
+    guard let text = copiedText, !text.isEmpty else {
+        return nil
+    }
+
+    return text
+}
+
 func sendCommandKey(keyCode: CGKeyCode) {
     guard let source = CGEventSource(stateID: .combinedSessionState) else { return }
 
@@ -519,20 +644,69 @@ func prefersPasteReplace(bundleID: String) -> Bool {
 
 func getAXSelectionContext(app: NSRunningApplication) -> AXSelectionContext? {
     let appElement = AXUIElementCreateApplication(app.processIdentifier)
-    guard let element = focusedElement(for: appElement),
-          let selectionRange = selectedRange(for: element),
-          let selectionText = selectedText(for: element, range: selectionRange),
-          !selectionText.isEmpty else {
+
+    // Strategy 1: Try focused element first (fast path)
+    if let element = focusedElement(for: appElement) {
+        let role = stringAttribute(element: element, attribute: kAXRoleAttribute as String) ?? ""
+        if role != "AXWindow" && role != "AXApplication" {
+            if let range = selectedRange(for: element),
+               let text = selectedText(for: element, range: range),
+               !text.isEmpty {
+                debugLog("  AXContext: focused element hit, role=\(role)")
+                return AXSelectionContext(
+                    element: element, text: text, editable: isEditable(element: element),
+                    range: range, bounds: boundsForRange(element: element, range: range))
+            }
+        }
+    }
+
+    // Strategy 2: Search all windows for text elements with selection
+    var windowsRef: CFTypeRef?
+    let winResult = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
+    guard winResult == .success, let windows = windowsRef as? [AXUIElement] else {
+        debugLog("  AXContext: cannot get windows, code=\(winResult.rawValue)")
         return nil
     }
 
-    return AXSelectionContext(
-        element: element,
-        text: selectionText,
-        editable: isEditable(element: element),
-        range: selectionRange,
-        bounds: boundsForRange(element: element, range: selectionRange)
-    )
+    debugLog("  AXContext: searching \(windows.count) windows for selected text")
+    for window in windows {
+        if let ctx = findSelectedTextInTree(window, depth: 0) {
+            return ctx
+        }
+    }
+
+    debugLog("  AXContext: no selected text in any window")
+    return nil
+}
+
+/// Search the AX tree for an element that has non-empty selected text
+func findSelectedTextInTree(_ element: AXUIElement, depth: Int) -> AXSelectionContext? {
+    if depth > 8 { return nil }
+
+    // Check if this element has selected text
+    if let range = selectedRange(for: element),
+       let text = selectedText(for: element, range: range),
+       !text.isEmpty {
+        let role = stringAttribute(element: element, attribute: kAXRoleAttribute as String) ?? ""
+        debugLog("  findSelected: HIT role=\(role) text=\(text.count) chars at depth \(depth)")
+        return AXSelectionContext(
+            element: element, text: text, editable: isEditable(element: element),
+            range: range, bounds: boundsForRange(element: element, range: range))
+    }
+
+    // Recurse into children
+    var childrenRef: CFTypeRef?
+    let result = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef)
+    guard result == .success, let children = childrenRef as? [AXUIElement] else {
+        return nil
+    }
+
+    for child in children {
+        if let ctx = findSelectedTextInTree(child, depth: depth + 1) {
+            return ctx
+        }
+    }
+    return nil
 }
 
 func selectionAnchor(for selection: AXSelectionContext, mousePos: NSPoint) -> CGPoint? {
@@ -572,17 +746,77 @@ func squaredDistance(from lhs: CGPoint, to rhs: CGPoint) -> CGFloat {
 }
 
 func focusedElement(for appElement: AXUIElement) -> AXUIElement? {
-    var focusedElement: CFTypeRef?
+    // Strategy 1: system-wide focused element
+    let systemWide = AXUIElementCreateSystemWide()
+    var systemFocusRef: CFTypeRef?
+    let systemResult = AXUIElementCopyAttributeValue(
+        systemWide,
+        kAXFocusedUIElementAttribute as CFString,
+        &systemFocusRef
+    )
+    if systemResult == .success, let element = systemFocusRef {
+        let el = element as! AXUIElement
+        let role = stringAttribute(element: el, attribute: kAXRoleAttribute as String) ?? ""
+        if role != "AXWindow" && role != "AXApplication" {
+            return el
+        }
+    }
+
+    // Strategy 2: app-level focused element
+    var focusedRef: CFTypeRef?
     let focusResult = AXUIElementCopyAttributeValue(
         appElement,
         kAXFocusedUIElementAttribute as CFString,
-        &focusedElement
+        &focusedRef
     )
-    guard focusResult == .success, let rawElement = focusedElement else {
+    if focusResult == .success, let rawElement = focusedRef {
+        let el = rawElement as! AXUIElement
+        let role = stringAttribute(element: el, attribute: kAXRoleAttribute as String) ?? ""
+        if role != "AXWindow" && role != "AXApplication" {
+            return el
+        }
+
+        // Strategy 3: Got a window — walk children tree to find text elements
+        if let textEl = findTextElement(in: el, depth: 0) {
+            return textEl
+        }
+    }
+
+    return nil
+}
+
+/// Recursively search for a text-capable element in the AX tree (max depth 6)
+func findTextElement(in element: AXUIElement, depth: Int) -> AXUIElement? {
+    if depth > 6 { return nil }
+
+    let role = stringAttribute(element: element, attribute: kAXRoleAttribute as String) ?? ""
+    let textRoles: Set<String> = ["AXTextArea", "AXTextField", "AXComboBox", "AXSearchField", "AXWebArea", "AXStaticText"]
+    if textRoles.contains(role) {
+        debugLog("  findTextElement: found \(role) at depth \(depth)")
+        return element
+    }
+
+    // Get children
+    var childrenRef: CFTypeRef?
+    let result = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef)
+    guard result == .success, let children = childrenRef as? [AXUIElement] else {
+        if depth == 0 {
+            debugLog("  findTextElement: no children at depth 0, AX code=\(result.rawValue)")
+        }
         return nil
     }
 
-    return (rawElement as! AXUIElement)
+    if depth == 0 {
+        debugLog("  findTextElement: window has \(children.count) children, searching...")
+    }
+
+    for child in children {
+        if let found = findTextElement(in: child, depth: depth + 1) {
+            return found
+        }
+    }
+
+    return nil
 }
 
 func selectedRange(for element: AXUIElement) -> NSRange? {
