@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import React, { useEffect, useRef, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
@@ -20,13 +20,13 @@ import {
 import { AnimatePresence, motion, useMotionValue, useSpring, useTransform, type MotionValue } from "motion/react";
 import { saveSentence as dbSave, saveTransform } from "../services/db";
 
-const DOCK_SIZE = 36;
-const DOCK_MAGNIFICATION = 62;
-const DOCK_DISTANCE = 150;
+const DOCK_SIZE = 28;
+const DOCK_MAGNIFICATION = 48;
+const DOCK_DISTANCE = 120;
 const ORB_WINDOW_WIDTH = 18;
 const ORB_WINDOW_HEIGHT = 18;
-const DOCK_WINDOW_WIDTH = 420;
-const DOCK_WINDOW_HEIGHT = 106;
+const DOCK_WINDOW_WIDTH = 340;
+const DOCK_WINDOW_HEIGHT = 84;
 const PANEL_WINDOW_WIDTH = 576;
 const WINDOW_SHADOW_BLEED_X = 18;
 const WINDOW_SHADOW_BLEED_Y = 20;
@@ -811,37 +811,37 @@ export default function ActionBar() {
     {
       id: "to_english",
       label: "1 To English",
-      icon: <Languages size={20} />,
+      icon: <Languages size={16} />,
       action: () => runAI("to_english"),
     },
     {
       id: "to_chinese",
       label: "2 To Chinese",
-      icon: <BookOpen size={20} />,
+      icon: <BookOpen size={16} />,
       action: () => runAI("to_chinese"),
     },
     {
       id: "expand",
       label: "3 Expand",
-      icon: <Maximize2 size={20} />,
+      icon: <Maximize2 size={16} />,
       action: () => runAI("expand"),
     },
     {
       id: "custom_ai",
       label: "4 Ask / Improve",
-      icon: <MessageSquare size={20} />,
+      icon: <MessageSquare size={16} />,
       action: () => openComposer("ask"),
     },
     {
       id: "save",
       label: "5 Save",
-      icon: <Bookmark size={20} />,
+      icon: <Bookmark size={16} />,
       action: handleSave,
     },
     {
       id: "copy",
       label: "6 Copy",
-      icon: <Copy size={20} />,
+      icon: <Copy size={16} />,
       action: copyText,
     },
   ];
@@ -871,7 +871,7 @@ export default function ActionBar() {
           padding:
             surfaceMode === "orb" && !composerMode && !result
               ? "0"
-              : "22px 14px 14px",
+              : "16px 10px 10px",
           boxSizing: "border-box",
           background: "transparent",
           overflow: "visible",
@@ -880,9 +880,14 @@ export default function ActionBar() {
       {!composerMode && !result && surfaceMode === "orb" ? (
         <motion.button
           type="button"
-          initial={{ opacity: 0, scale: 0.84 }}
-          animate={{ opacity: 1, scale: orbHovered ? 1.08 : 1 }}
-          transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+          initial={{ opacity: 0, scale: 0.72 }}
+          animate={{ opacity: 1, scale: orbHovered ? 1.12 : 1 }}
+          transition={{
+            type: "spring",
+            mass: 0.25,
+            stiffness: 520,
+            damping: 26,
+          }}
           onMouseEnter={() => setOrbHovered(true)}
           onMouseLeave={() => setOrbHovered(false)}
           onClick={() => {
@@ -902,6 +907,9 @@ export default function ActionBar() {
             padding: 0,
             display: "grid",
             placeItems: "center",
+            willChange: "transform",
+            transform: "translateZ(0)",
+            backfaceVisibility: "hidden",
           }}
         />
       ) : (
@@ -911,17 +919,28 @@ export default function ActionBar() {
           onMouseMove={(event) => syncDockHoverFromClientPoint(event.clientX, event.clientY)}
           onMouseEnter={(event) => syncDockHoverFromClientPoint(event.clientX, event.clientY)}
           onMouseLeave={clearDockHover}
+          initial={{ opacity: 0, scale: 0.94, y: 4 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{
+            type: "spring",
+            mass: 0.3,
+            stiffness: 360,
+            damping: 26,
+          }}
           style={{
             display: "flex",
             alignItems: "flex-end",
-            gap: 8,
-            padding: "6px 10px 8px",
-            borderRadius: 22,
+            gap: 6,
+            padding: "5px 8px 6px",
+            borderRadius: 18,
             background: "linear-gradient(180deg, rgba(255,255,255,0.985), rgba(248,250,252,0.96))",
             backdropFilter: "blur(14px)",
             WebkitBackdropFilter: "blur(14px)",
             border: "1px solid rgba(226,232,240,0.96)",
-            boxShadow: "0 14px 28px rgba(15,23,42,0.08), inset 0 1px 0 rgba(255,255,255,0.94)",
+            boxShadow: "0 10px 22px rgba(15,23,42,0.08), inset 0 1px 0 rgba(255,255,255,0.94)",
+            willChange: "transform",
+            transform: "translateZ(0)",
+            backfaceVisibility: "hidden",
           }}
         >
           {actions.map((a) => (
@@ -1606,7 +1625,7 @@ function describeReplaceError(message: string, sourceName: string): {
   };
 }
 
-function DockIcon({
+const DockIcon = React.memo(function DockIcon({
   id,
   mouseX,
   children,
@@ -1628,13 +1647,30 @@ function DockIcon({
   onClick: () => void;
 }) {
   const ref = useRef<HTMLButtonElement | null>(null);
-  const distance = useTransform(mouseX, (value) => {
-    const bounds = ref.current?.getBoundingClientRect();
-    if (!bounds) {
-      return DOCK_DISTANCE;
-    }
-    return value - (bounds.x + bounds.width / 2);
-  });
+  // Cache button center X so `useTransform` never forces a synchronous layout.
+  // We refresh on mount, resize, and when the dock container scrolls/moves.
+  const centerXRef = useRef<number>(0);
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const update = () => {
+      const bounds = node.getBoundingClientRect();
+      centerXRef.current = bounds.x + bounds.width / 2;
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(node);
+    if (node.parentElement) ro.observe(node.parentElement);
+    window.addEventListener("resize", update);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, []);
+
+  const distance = useTransform(mouseX, (value) => value - centerXRef.current);
+  // Single spring drives everything; lift/iconScale are pure transforms off it.
   const size = useSpring(
     useTransform(
       distance,
@@ -1642,27 +1678,13 @@ function DockIcon({
       [DOCK_SIZE, DOCK_MAGNIFICATION, DOCK_SIZE]
     ),
     {
-      mass: 0.18,
-      stiffness: 220,
-      damping: 18,
+      mass: 0.12,
+      stiffness: 300,
+      damping: 22,
     }
   );
-  const lift = useSpring(
-    useTransform(size, [DOCK_SIZE, DOCK_MAGNIFICATION], [0, -6]),
-    {
-      mass: 0.2,
-      stiffness: 220,
-      damping: 20,
-    }
-  );
-  const iconScale = useSpring(
-    useTransform(size, [DOCK_SIZE, DOCK_MAGNIFICATION], [1, 1.1]),
-    {
-      mass: 0.2,
-      stiffness: 220,
-      damping: 20,
-    }
-  );
+  const lift = useTransform(size, [DOCK_SIZE, DOCK_MAGNIFICATION], [0, -6]);
+  const iconScale = useTransform(size, [DOCK_SIZE, DOCK_MAGNIFICATION], [1, 1.1]);
   const setMouseToCenter = () => {
     const bounds = ref.current?.getBoundingClientRect();
     if (!bounds) {
@@ -1708,7 +1730,13 @@ function DockIcon({
         }}
         type="button"
         className={`dock-icon ${hovered ? "dock-icon-hovered" : ""}`}
-        style={{ width: size, height: size, y: lift }}
+        style={{
+          width: size,
+          height: size,
+          y: lift,
+          willChange: "width, height, transform",
+          backfaceVisibility: "hidden",
+        }}
         onMouseEnter={() => {
           setMouseToCenter();
           onHoverChange(true);
@@ -1731,7 +1759,7 @@ function DockIcon({
           }}
         >
           {isLoading ? (
-            <Loader2 size={18} className="spin" />
+            <Loader2 size={15} className="spin" />
           ) : (
             children
           )}
@@ -1739,4 +1767,4 @@ function DockIcon({
       </motion.button>
     </div>
   );
-}
+});
