@@ -339,13 +339,13 @@ export default function ActionBar() {
         <motion.button
           ref={orbRef}
           type="button"
-          initial={{ opacity: 0, scale: 0.72 }}
-          animate={{ opacity: 1, scale: orbHovered ? 1.12 : 1 }}
+          initial={{ opacity: 0, scale: 0.86 }}
+          animate={{ opacity: 1, scale: orbHovered ? 1.04 : 1 }}
           transition={{
             type: "spring",
-            mass: 0.25,
-            stiffness: 520,
-            damping: 26,
+            mass: 0.22,
+            stiffness: 420,
+            damping: 28,
           }}
           onMouseEnter={() => setOrbHovered(true)}
           onMouseLeave={() => setOrbHovered(false)}
@@ -361,8 +361,8 @@ export default function ActionBar() {
             border: "none",
             background: "#0a0a0a",
             boxShadow: orbHovered
-              ? "0 4px 10px rgba(0,0,0,0.22)"
-              : "0 3px 8px rgba(0,0,0,0.18)",
+              ? "0 3px 8px rgba(0,0,0,0.18)"
+              : "0 2px 6px rgba(0,0,0,0.14)",
             cursor: "pointer",
             padding: 0,
             display: "grid",
@@ -379,14 +379,9 @@ export default function ActionBar() {
           onMouseMove={(event) => syncDockHoverFromClientPoint(event.clientX, event.clientY)}
           onMouseEnter={(event) => syncDockHoverFromClientPoint(event.clientX, event.clientY)}
           onMouseLeave={clearDockHover}
-          initial={{ opacity: 0, scale: 0.94, y: 4 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          transition={{
-            type: "spring",
-            mass: 0.3,
-            stiffness: 360,
-            damping: 26,
-          }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.12, ease: "easeOut" }}
           style={{
             display: "flex",
             alignItems: "flex-end",
@@ -394,8 +389,8 @@ export default function ActionBar() {
             padding: "7px",
             borderRadius: 18,
             background: "#ffffff",
-            border: "1px solid rgba(10,10,10,0.1)",
-            boxShadow: "0 8px 18px rgba(0,0,0,0.08)",
+            border: "1px solid rgba(10,10,10,0.09)",
+            boxShadow: "0 6px 16px rgba(0,0,0,0.08)",
             willChange: "transform",
             transform: "translateZ(0)",
             backfaceVisibility: "hidden",

@@ -36,14 +36,14 @@ export const DockIcon = React.memo(function DockIcon({
       <AnimatePresence>
         {hovered && (
           <motion.div
-            initial={{ opacity: 0, y: 4, scale: 0.96 }}
+            initial={{ opacity: 0, y: 2, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 4, scale: 0.96 }}
+            exit={{ opacity: 0, y: 2, scale: 0.98 }}
             transition={{
               type: "spring",
               mass: 0.2,
-              stiffness: 420,
-              damping: 26,
+              stiffness: 360,
+              damping: 30,
             }}
             style={{
               position: "absolute",
@@ -66,7 +66,7 @@ export const DockIcon = React.memo(function DockIcon({
               whiteSpace: "nowrap",
               pointerEvents: "none",
               zIndex: 10,
-              boxShadow: "0 10px 22px rgba(0,0,0,0.1)",
+              boxShadow: "0 8px 18px rgba(0,0,0,0.09)",
             }}
           >
             <span>{label}</span>
@@ -90,9 +90,9 @@ export const DockIcon = React.memo(function DockIcon({
         }}
         type="button"
         className={`dock-icon ${hovered ? "dock-icon-hovered" : ""}`}
-        animate={{ scale: hovered ? 1.06 : 1, y: hovered ? -1 : 0 }}
-        whileTap={{ scale: 0.9 }}
-        transition={{ type: "spring", mass: 0.15, stiffness: 600, damping: 22 }}
+        animate={{ scale: hovered ? 1.02 : 1 }}
+        whileTap={{ scale: 0.96 }}
+        transition={{ type: "spring", mass: 0.18, stiffness: 380, damping: 28 }}
         style={{
           width: DOCK_SIZE,
           height: DOCK_SIZE,

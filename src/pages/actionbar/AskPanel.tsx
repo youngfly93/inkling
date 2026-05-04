@@ -3,11 +3,20 @@ import { Loader2, SendHorizontal } from "lucide-react";
 import { motion } from "motion/react";
 import { AskIcon } from "./icons";
 import {
+  panelBodyStyle,
+  panelCaptionStyle,
   panelGhostButtonStyle,
+  panelHeaderStyle,
+  panelIconBadgeStyle,
   panelIconButtonStyle,
   panelKickerStyle,
   panelPrimaryButtonStyle,
+  panelSourceStyle,
+  panelSurfaceStyle,
+  panelTextareaStyle,
+  panelTitleStyle,
   preventButtonFocus,
+  sourcePreviewStyle,
 } from "./styles";
 
 interface AskPanelProps {
@@ -39,61 +48,15 @@ export function AskPanel({
       initial={{ opacity: 0, y: -10, scale: 0.985 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-      style={{
-        width: 360,
-        maxWidth: "96vw",
-        borderRadius: 12,
-        overflow: "hidden",
-        background: "#ffffff",
-        border: "1px solid rgba(10,10,10,0.1)",
-        boxShadow: "0 14px 32px rgba(0,0,0,0.12)",
-      }}
+      style={panelSurfaceStyle()}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "10px 12px",
-          borderBottom: "1px solid rgba(10,10,10,0.06)",
-        }}
-      >
-        <div
-          style={{
-            width: 22,
-            height: 22,
-            flexShrink: 0,
-            display: "grid",
-            placeItems: "center",
-            borderRadius: 6,
-            background: "#0a0a0a",
-            color: "#ffffff",
-          }}
-        >
+      <div style={panelHeaderStyle()}>
+        <div style={panelIconBadgeStyle()}>
           <AskIcon />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              color: "#0a0a0a",
-              fontSize: 12,
-              fontWeight: 650,
-            }}
-          >
-            Ask AI
-          </div>
-          <div
-            style={{
-              marginTop: 1,
-              color: "rgba(10,10,10,0.45)",
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-              fontSize: 10,
-              letterSpacing: "0.06em",
-              textTransform: "uppercase",
-            }}
-          >
-            selected text
-          </div>
+          <div style={panelTitleStyle()}>Ask AI</div>
+          <div style={panelCaptionStyle()}>selected text</div>
         </div>
         <button
           type="button"
@@ -106,32 +69,12 @@ export function AskPanel({
         </button>
       </div>
 
-      <div
-        style={{
-          padding: "10px 12px 6px",
-          borderBottom: "1px dashed rgba(10,10,10,0.08)",
-        }}
-      >
+      <div style={panelSourceStyle()}>
         <div style={panelKickerStyle()}>Source · {sourceName}</div>
-        <div
-          style={{
-            marginTop: 4,
-            color: "rgba(10,10,10,0.55)",
-            fontSize: 12,
-            lineHeight: 1.5,
-            maxHeight: 36,
-            overflow: "hidden",
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical",
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          {selectedText}
-        </div>
+        <div style={sourcePreviewStyle()}>{selectedText}</div>
       </div>
 
-      <div style={{ padding: "10px 12px 12px", background: "#fafafa" }}>
+      <div style={panelBodyStyle()}>
         <div style={panelKickerStyle()}>Question</div>
         <textarea
           ref={inputRef}
@@ -144,22 +87,7 @@ export function AskPanel({
             }
           }}
           placeholder="Ask about the selected text..."
-          style={{
-            width: "100%",
-            minHeight: 76,
-            marginTop: 6,
-            resize: "vertical",
-            border: "1px solid rgba(10,10,10,0.1)",
-            borderRadius: 8,
-            outline: "none",
-            padding: "9px 10px",
-            boxSizing: "border-box",
-            color: "#0a0a0a",
-            background: "#ffffff",
-            fontFamily: "inherit",
-            fontSize: 13,
-            lineHeight: 1.45,
-          }}
+          style={panelTextareaStyle()}
         />
         <div
           style={{
