@@ -19,7 +19,7 @@ import {
   undoLastNativeReplace,
 } from "./nativeActions";
 import type { ResizeActionBarWindow } from "./useActionbarWindow";
-import type { PanelAction, RevealPanelPayload } from "./state";
+import type { AskContext, PanelAction, RevealPanelPayload } from "./state";
 import type { Selection, SurfaceMode, TransformActionId } from "./types";
 
 interface UseActionbarActionsOptions {
@@ -27,7 +27,9 @@ interface UseActionbarActionsOptions {
   sourceName: string;
   loading: string | null;
   result: string | null;
+  resultTitle: string | null;
   askQuestion: string;
+  askContext: AskContext | null;
   dispatchPanel: Dispatch<PanelAction>;
   resizeActionBarWindow: ResizeActionBarWindow;
   setSurfaceMode: Dispatch<SetStateAction<SurfaceMode>>;
@@ -41,7 +43,9 @@ export function useActionbarActions({
   sourceName,
   loading,
   result,
+  resultTitle,
   askQuestion,
+  askContext,
   dispatchPanel,
   resizeActionBarWindow,
   setSurfaceMode,
@@ -198,11 +202,29 @@ export function useActionbarActions({
     await getCurrentWindow().hide();
   }
 
-  async function openAskPanel() {
+  function buildAskContext(kind: "selection" | "result" = result?.trim() ? "result" : "selection"): AskContext {
+    if (kind === "result" && result?.trim()) {
+      return {
+        kind: "result",
+        sourceName: "AI result",
+        label: resultTitle || "current result",
+        text: result,
+      };
+    }
+
+    return {
+      kind: "selection",
+      sourceName,
+      label: "selected text",
+      text,
+    };
+  }
+
+  async function openAskPanel(kind?: "selection" | "result") {
     const win = getCurrentWindow();
     setSurfaceMode("dock");
     setOrbHovered(false);
-    dispatchPanel({ type: "openAskPanel" });
+    dispatchPanel({ type: "openAskPanel", context: buildAskContext(kind) });
     clearDockHover();
     await resizeActionBarWindow(PANEL_WINDOW_WIDTH, 318, { anchor: "top-left" });
     await win.show();
@@ -218,6 +240,14 @@ export function useActionbarActions({
   async function submitAsk() {
     const question = askQuestion.trim();
     if (!question || loading) {
+      askInputRef.current?.focus();
+      return;
+    }
+
+    const context = askContext ?? buildAskContext("selection");
+    const contextText = context.text.trim();
+
+    if (!contextText) {
       askInputRef.current?.focus();
       return;
     }
@@ -242,26 +272,29 @@ export function useActionbarActions({
       }
 
       const output = await askAboutSelectedText({
-        text,
+        text: contextText,
         question,
         config,
       });
 
       await saveTransformResultBestEffort({
-        text,
+        text: contextText,
         app: app || null,
         url: url || null,
         type: "ask",
-        inputText: `${text}\n\nQ: ${question}`,
+        inputText: `${contextText}\n\nQ: ${question}`,
         outputText: output,
         model: config.model,
       });
 
       await revealPanel({
-        title: "Ask AI answered",
+        title: context.kind === "result" ? "Follow-up answered" : "Ask AI answered",
         body: output,
         tone: "neutral",
-        status: "Answer based on the selected text and your question.",
+        status:
+          context.kind === "result"
+            ? "Answer based on the current AI result and your question."
+            : "Answer based on the selected text and your question.",
         height: 380,
         canReplace: false,
         kind: "answer",

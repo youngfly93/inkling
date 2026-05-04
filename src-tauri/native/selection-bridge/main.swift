@@ -658,7 +658,7 @@ func sendCommandKey(keyCode: CGKeyCode) {
 
 func getSelectionViaAX(pid: pid_t, bundleID: String, appName: String, mousePos: NSPoint) -> SelectionSnapshot? {
     guard let app = NSRunningApplication(processIdentifier: pid),
-          let selection = getAXSelectionContext(app: app) else {
+          let selection = getAXSelectionContext(app: app, mousePos: mousePos) else {
         return nil
     }
 
@@ -693,7 +693,7 @@ func prefersPasteReplace(bundleID: String) -> Bool {
     return pasteFirstApps.contains(bundleID)
 }
 
-func getAXSelectionContext(app: NSRunningApplication) -> AXSelectionContext? {
+func getAXSelectionContext(app: NSRunningApplication, mousePos: NSPoint? = nil) -> AXSelectionContext? {
     let appElement = AXUIElementCreateApplication(app.processIdentifier)
 
     // Strategy 1: Try focused element first (fast path)
@@ -711,7 +711,9 @@ func getAXSelectionContext(app: NSRunningApplication) -> AXSelectionContext? {
         }
     }
 
-    // Strategy 2: Search all windows for text elements with selection
+    // Strategy 2: Search only the focused window and the window under the
+    // pointer. Searching every window can pick up stale selections from
+    // background windows in multi-window apps such as TextEdit.
     var windowsRef: CFTypeRef?
     let winResult = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
     guard winResult == .success, let windows = windowsRef as? [AXUIElement] else {
@@ -719,14 +721,36 @@ func getAXSelectionContext(app: NSRunningApplication) -> AXSelectionContext? {
         return nil
     }
 
-    debugLog("  AXContext: searching \(windows.count) windows for selected text")
-    for window in windows {
+    var candidateWindows: [AXUIElement] = []
+    if let focusedWindow = focusedWindow(for: appElement) {
+        candidateWindows.append(focusedWindow)
+    }
+    if let mousePos {
+        let mouseTopLeft = appKitToQuartz(mousePos)
+        candidateWindows.append(contentsOf: windows.filter { window in
+            guard let frame = frameForElement(window) else {
+                return false
+            }
+            return frame.insetBy(dx: -24, dy: -24).contains(mouseTopLeft)
+        })
+    }
+    if candidateWindows.isEmpty, windows.count == 1, let onlyWindow = windows.first {
+        candidateWindows.append(onlyWindow)
+    }
+
+    guard !candidateWindows.isEmpty else {
+        debugLog("  AXContext: no focused or pointer-matched window")
+        return nil
+    }
+
+    debugLog("  AXContext: searching \(candidateWindows.count) candidate windows for selected text")
+    for window in candidateWindows {
         if let ctx = findSelectedTextInTree(window, depth: 0) {
             return ctx
         }
     }
 
-    debugLog("  AXContext: no selected text in any window")
+    debugLog("  AXContext: no selected text in candidate windows")
     return nil
 }
 
@@ -850,6 +874,20 @@ func focusedElement(for appElement: AXUIElement) -> AXUIElement? {
     }
 
     return nil
+}
+
+func focusedWindow(for appElement: AXUIElement) -> AXUIElement? {
+    var windowRef: CFTypeRef?
+    let result = AXUIElementCopyAttributeValue(
+        appElement,
+        kAXFocusedWindowAttribute as CFString,
+        &windowRef
+    )
+    guard result == .success, let windowRef else {
+        return nil
+    }
+
+    return (windowRef as! AXUIElement)
 }
 
 /// Recursively search for a text-capable element in the AX tree (max depth 6)

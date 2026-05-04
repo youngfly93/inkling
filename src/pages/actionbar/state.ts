@@ -1,5 +1,12 @@
 import type { ActionId, ResultKind, ResultTone } from "./types";
 
+export interface AskContext {
+  kind: "selection" | "result";
+  sourceName: string;
+  label: string;
+  text: string;
+}
+
 export interface PanelState {
   loading: string | null;
   result: string | null;
@@ -14,6 +21,7 @@ export interface PanelState {
   resultActionId: ActionId | null;
   askPanelOpen: boolean;
   askQuestion: string;
+  askContext: AskContext | null;
 }
 
 export const initialPanelState: PanelState = {
@@ -30,6 +38,7 @@ export const initialPanelState: PanelState = {
   resultActionId: null,
   askPanelOpen: false,
   askQuestion: "",
+  askContext: null,
 };
 
 export type RevealPanelPayload = {
@@ -48,7 +57,8 @@ export type PanelAction =
   | { type: "selectionReady" }
   | { type: "resetInlinePanels" }
   | { type: "revealPanel"; payload: RevealPanelPayload }
-  | { type: "openAskPanel" }
+  | { type: "openAskPanel"; context: AskContext }
+  | { type: "closeAskPanel" }
   | { type: "setAskQuestion"; question: string }
   | { type: "beginTransform"; loading: string }
   | { type: "setLoading"; loading: string | null }
@@ -81,6 +91,7 @@ export function panelReducer(state: PanelState, action: PanelAction): PanelState
         resultActionId: null,
         askPanelOpen: false,
         askQuestion: "",
+        askContext: null,
       };
 
     case "revealPanel":
@@ -100,17 +111,21 @@ export function panelReducer(state: PanelState, action: PanelAction): PanelState
     case "openAskPanel":
       return {
         ...state,
-        result: null,
-        resultTitle: null,
-        resultTone: "neutral",
-        statusMessage: null,
-        showSettingsCta: false,
-        resultCanReplace: false,
-        resultKind: "answer",
-        resultActionId: "ask",
+        resultKind: action.context.kind === "selection" ? "answer" : state.resultKind,
+        resultActionId: action.context.kind === "selection" ? "ask" : state.resultActionId,
         askPanelOpen: true,
+        askQuestion: "",
+        askContext: action.context,
         copied: false,
         replaceApplied: false,
+      };
+
+    case "closeAskPanel":
+      return {
+        ...state,
+        askPanelOpen: false,
+        askQuestion: "",
+        askContext: null,
       };
 
     case "setAskQuestion":

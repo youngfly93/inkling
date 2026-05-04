@@ -24,6 +24,7 @@ interface AskPanelProps {
   question: string;
   loading: string | null;
   sourceName: string;
+  contextLabel: string;
   selectedText: string;
   onQuestionChange: (value: string) => void;
   onClose: () => void;
@@ -35,6 +36,7 @@ export function AskPanel({
   question,
   loading,
   sourceName,
+  contextLabel,
   selectedText,
   onQuestionChange,
   onClose,
@@ -56,7 +58,7 @@ export function AskPanel({
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={panelTitleStyle()}>Ask AI</div>
-          <div style={panelCaptionStyle()}>selected text</div>
+          <div style={panelCaptionStyle()}>{contextLabel}</div>
         </div>
         <button
           type="button"
@@ -86,7 +88,7 @@ export function AskPanel({
               onSubmit();
             }
           }}
-          placeholder="Ask about the selected text..."
+          placeholder={contextLabel === "selected text" ? "Ask about the selected text..." : "Ask about this result..."}
           style={panelTextareaStyle()}
         />
         <div

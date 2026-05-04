@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { AlertCircle, ArrowUpRight, Check, Copy } from "lucide-react";
 import { motion } from "motion/react";
+import { AskIcon } from "./icons";
 import {
   panelBodyStyle,
   panelCaptionStyle,
@@ -40,6 +41,7 @@ interface ResultPanelProps {
   onClose: () => void;
   onRetry: () => void;
   onOpenSettings: () => void;
+  onAsk: () => void;
   onCopy: () => void;
   onUndo: () => void;
   onReplace: () => void;
@@ -64,6 +66,7 @@ export function ResultPanel({
   onClose,
   onRetry,
   onOpenSettings,
+  onAsk,
   onCopy,
   onUndo,
   onReplace,
@@ -131,6 +134,12 @@ export function ResultPanel({
           <button type="button" onMouseDown={preventButtonFocus} onClick={onOpenSettings} style={panelGhostButtonStyle()}>
             <ArrowUpRight size={11} />
             Settings
+          </button>
+        )}
+        {!isErrorResult && (
+          <button type="button" onMouseDown={preventButtonFocus} onClick={onAsk} style={panelGhostButtonStyle()}>
+            <AskIcon size={11} />
+            Ask
           </button>
         )}
         {!isErrorResult && (

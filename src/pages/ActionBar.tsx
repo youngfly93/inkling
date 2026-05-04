@@ -55,6 +55,7 @@ export default function ActionBar() {
     resultActionId,
     askPanelOpen,
     askQuestion,
+    askContext,
   } = panel;
   const text = sel.text;
   const sourceName = getSourceName(sel);
@@ -96,7 +97,9 @@ export default function ActionBar() {
     sourceName,
     loading,
     result,
+    resultTitle,
     askQuestion,
+    askContext,
     dispatchPanel,
     resizeActionBarWindow,
     setSurfaceMode,
@@ -182,6 +185,13 @@ export default function ActionBar() {
     await getCurrentWindow().show();
   }
 
+  async function closeAskPanel() {
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    await invoke("set_actionbar_input_mode", { enabled: false }).catch(() => {});
+    dispatchPanel({ type: "closeAskPanel" });
+    await getCurrentWindow().show();
+  }
+
   useEffect(() => {
     const onBlur = () => {
       setHoveredAction(null);
@@ -200,7 +210,11 @@ export default function ActionBar() {
       if (isTextInput) {
         if (key === "escape") {
           e.preventDefault();
-          void collapseToOrb();
+          if (result && askPanelOpen) {
+            void closeAskPanel();
+          } else {
+            void collapseToOrb();
+          }
         }
         return;
       }
@@ -235,7 +249,7 @@ export default function ActionBar() {
         case "a":
         case "A":
           e.preventDefault();
-          void openAskPanel();
+          void openAskPanel(result ? "result" : "selection");
           break;
         case "1":
           e.preventDefault();
@@ -276,7 +290,7 @@ export default function ActionBar() {
   const actionHandlersRef = useRef<Record<string, () => void>>({});
   actionHandlersRef.current = {
     ask: () => {
-      void openAskPanel();
+      void openAskPanel(result ? "result" : "selection");
     },
     translate: () => runAI("translate"),
     polish: () => runAI("polish"),
@@ -435,18 +449,23 @@ export default function ActionBar() {
         </motion.div>
       ) : null}
 
-      {askPanelOpen && !result && (
+      {askPanelOpen && (
         <AskPanel
           inputRef={askInputRef}
           question={askQuestion}
           loading={loading}
-          sourceName={sourceName}
-          selectedText={text}
+          sourceName={askContext?.sourceName ?? sourceName}
+          contextLabel={askContext?.label ?? "selected text"}
+          selectedText={askContext?.text ?? text}
           onQuestionChange={(question) => {
             dispatchPanel({ type: "setAskQuestion", question });
           }}
           onClose={() => {
-            void collapseToOrb();
+            if (result) {
+              void closeAskPanel();
+            } else {
+              void collapseToOrb();
+            }
           }}
           onSubmit={() => {
             void submitAsk();
@@ -454,7 +473,7 @@ export default function ActionBar() {
         />
       )}
 
-      {result && (
+      {result && !askPanelOpen && (
         <ResultPanel
           result={result}
           resultTone={resultTone}
@@ -483,6 +502,9 @@ export default function ActionBar() {
           }}
           onOpenSettings={() => {
             void openSettings();
+          }}
+          onAsk={() => {
+            void openAskPanel("result");
           }}
           onCopy={copyText}
           onUndo={() => {
