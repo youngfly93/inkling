@@ -1,0 +1,13 @@
+export const DOCK_SIZE = 30;
+export const ORB_WINDOW_WIDTH = 18;
+export const ORB_WINDOW_HEIGHT = 18;
+export const DOCK_WINDOW_WIDTH = 258;
+export const DOCK_WINDOW_HEIGHT = 124;
+export const PANEL_WINDOW_WIDTH = 398;
+export const WINDOW_SHADOW_BLEED_X = 36;
+export const WINDOW_SHADOW_BLEED_Y = 46;
+export const ORB_SHADOW_BLEED_X = 4;
+export const ORB_SHADOW_BLEED_Y = 4;
+export const SURFACE_PADDING_X = 18;
+export const SURFACE_PADDING_TOP = 42;
+export const SURFACE_PADDING_BOTTOM = 16;

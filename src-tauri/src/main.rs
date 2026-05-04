@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    seleany_pro_lib::run()
+    inkling_lib::run()
 }

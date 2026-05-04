@@ -8,6 +8,8 @@ import AppKit
 import Foundation
 import ApplicationServices
 
+let ownBundleID = "com.seleany.pro"
+
 struct SelectionSnapshot: Encodable {
     let text: String
     let app: String
@@ -107,25 +109,66 @@ func appKitToQuartz(_ point: NSPoint) -> CGPoint {
     return CGPoint(x: point.x, y: primaryDisplayHeight() - point.y)
 }
 
+func dragAnchor(start: NSPoint, end: NSPoint) -> (anchor: CGPoint, mouse: CGPoint)? {
+    guard abs(start.x - end.x) > 2 || abs(start.y - end.y) > 2 else {
+        return nil
+    }
+
+    let anchorAppKit = NSPoint(
+        x: max(start.x, end.x),
+        y: min(start.y, end.y)
+    )
+
+    return (
+        anchor: appKitToQuartz(anchorAppKit),
+        mouse: appKitToQuartz(end)
+    )
+}
+
+func snapshotWithDragAnchor(_ snapshot: SelectionSnapshot, dragStart: NSPoint, dragEnd: NSPoint) -> SelectionSnapshot {
+    guard let drag = dragAnchor(start: dragStart, end: dragEnd) else {
+        return snapshot
+    }
+
+    return SelectionSnapshot(
+        text: snapshot.text,
+        app: snapshot.app,
+        appName: snapshot.appName,
+        url: snapshot.url,
+        editable: snapshot.editable,
+        method: snapshot.method,
+        mouseX: drag.mouse.x,
+        mouseY: drag.mouse.y,
+        anchorX: drag.anchor.x,
+        anchorY: drag.anchor.y
+    )
+}
+
 func runMonitor() {
     debugLog("runMonitor() entered")
     var lastText = ""
     var lastAppBundleID = ""
     var hadSelection = false
+    var dismissedText = ""
+    var dismissedAppBundleID = ""
     var debounceItem: DispatchWorkItem?
 
-    func emitClearIfNeeded(frontApp: NSRunningApplication?, mousePos: NSPoint) {
+    func emitClearIfNeeded(frontApp: NSRunningApplication?, mousePos: NSPoint, force: Bool = false) {
         let bundleID = frontApp?.bundleIdentifier ?? ""
-        if bundleID == "com.seleany.pro" || !hadSelection {
+        if bundleID == ownBundleID || (!force && !hadSelection) {
             return
         }
 
+        if hadSelection {
+            dismissedText = lastText
+            dismissedAppBundleID = lastAppBundleID
+        }
         hadSelection = false
         lastText = ""
         lastAppBundleID = ""
 
         let appName = frontApp?.localizedName ?? ""
-        let screenHeight = NSScreen.main?.frame.height ?? 900
+        let mouseQuartz = appKitToQuartz(mousePos)
         printJSON(
             SelectionSnapshot(
                 text: "",
@@ -134,8 +177,8 @@ func runMonitor() {
                 url: "",
                 editable: false,
                 method: "clear",
-                mouseX: mousePos.x,
-                mouseY: screenHeight - mousePos.y,
+                mouseX: mouseQuartz.x,
+                mouseY: mouseQuartz.y,
                 anchorX: nil,
                 anchorY: nil
             )
@@ -143,11 +186,11 @@ func runMonitor() {
         fflush(stdout)
     }
 
-    func processSelection(forceRefreshSameSelection: Bool = false, allowClipboard: Bool = false, canClear: Bool = true, dragStart: NSPoint = .zero, dragEnd: NSPoint = .zero) {
+    func processSelection(forceRefreshSameSelection: Bool = false, allowClipboard: Bool = false, canClear: Bool = true, allowDismissedRecapture: Bool = false, dragStart: NSPoint = .zero, dragEnd: NSPoint = .zero) {
         let frontApp = NSWorkspace.shared.frontmostApplication
         let bundleID = frontApp?.bundleIdentifier ?? ""
 
-        if bundleID == "com.seleany.pro" {
+        if bundleID == ownBundleID {
             return
         }
 
@@ -156,6 +199,16 @@ func runMonitor() {
                 if canClear {
                     emitClearIfNeeded(frontApp: frontApp, mousePos: NSEvent.mouseLocation)
                 }
+                return
+            }
+
+            let isDismissedSelection =
+                !allowDismissedRecapture
+                && !dismissedText.isEmpty
+                && snapshot.text == dismissedText
+                && snapshot.app == dismissedAppBundleID
+
+            if isDismissedSelection {
                 return
             }
 
@@ -171,6 +224,8 @@ func runMonitor() {
             hadSelection = true
             lastText = snapshot.text
             lastAppBundleID = snapshot.app
+            dismissedText = ""
+            dismissedAppBundleID = ""
             printJSON(snapshot)
             fflush(stdout)
         } else if canClear {
@@ -182,27 +237,41 @@ func runMonitor() {
 
     var wasDragging = false
     var dragStartPos = NSPoint.zero  // mouse position at drag start
-    var dragEndPos = NSPoint.zero    // mouse position at drag end (captured immediately)
 
     NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp, .rightMouseUp, .leftMouseDragged, .keyDown, .scrollWheel]) { event in
         if event.type == .leftMouseDown {
+            debounceItem?.cancel()
             wasDragging = false
             dragStartPos = NSEvent.mouseLocation
+            let frontApp = NSWorkspace.shared.frontmostApplication
+            emitClearIfNeeded(frontApp: frontApp, mousePos: dragStartPos, force: true)
             return
         }
         if event.type == .leftMouseDragged {
-            wasDragging = true
+            let currentPos = NSEvent.mouseLocation
+            wasDragging = dragAnchor(start: dragStartPos, end: currentPos) != nil
             return
         }
 
-        // Capture mouse position immediately at event time, before debounce delay
-        if event.type == .leftMouseUp && wasDragging {
-            dragEndPos = NSEvent.mouseLocation
+        if event.type == .scrollWheel || event.type == .keyDown {
+            debounceItem?.cancel()
+            wasDragging = false
+            let frontApp = NSWorkspace.shared.frontmostApplication
+            emitClearIfNeeded(frontApp: frontApp, mousePos: NSEvent.mouseLocation, force: true)
+            return
         }
 
+        let mouseUpPos = NSEvent.mouseLocation
+        let draggedAtMouseUp = event.type == .leftMouseUp
+            && wasDragging
+            && dragAnchor(start: dragStartPos, end: mouseUpPos) != nil
+        let dragStartAtMouseUp = dragStartPos
+        let dragEndAtMouseUp = mouseUpPos
+
+        // Capture mouse position immediately at event time, before debounce delay
         let eventType = event.type
         let delay: TimeInterval =
-            (eventType == .rightMouseUp || (eventType == .leftMouseUp && !wasDragging))
+            (eventType == .rightMouseUp || (eventType == .leftMouseUp && !draggedAtMouseUp))
             ? 0.05
             : 0.18
         debounceItem?.cancel()
@@ -210,30 +279,34 @@ func runMonitor() {
             let frontApp = NSWorkspace.shared.frontmostApplication
             let bundleID = frontApp?.bundleIdentifier ?? ""
 
-            if bundleID == "com.seleany.pro" {
+            if bundleID == ownBundleID {
                 return
             }
 
             // Right-click → clear
             if eventType == .rightMouseUp {
-                emitClearIfNeeded(frontApp: frontApp, mousePos: NSEvent.mouseLocation)
+                emitClearIfNeeded(frontApp: frontApp, mousePos: NSEvent.mouseLocation, force: true)
+                wasDragging = false
                 return
             }
 
             // Plain click (no drag) → user clicked elsewhere, clear the bar
-            if eventType == .leftMouseUp && !wasDragging {
-                emitClearIfNeeded(frontApp: frontApp, mousePos: NSEvent.mouseLocation)
+            if eventType == .leftMouseUp && !draggedAtMouseUp {
+                emitClearIfNeeded(frontApp: frontApp, mousePos: NSEvent.mouseLocation, force: true)
+                wasDragging = false
                 return
             }
 
-            let isDragEnd = eventType == .leftMouseUp && wasDragging
+            let isDragEnd = eventType == .leftMouseUp && draggedAtMouseUp
             processSelection(
-                forceRefreshSameSelection: eventType == .scrollWheel,
+                forceRefreshSameSelection: false,
                 allowClipboard: isDragEnd,
                 canClear: false,  // only explicit click/right-click above should clear
-                dragStart: dragStartPos,
-                dragEnd: dragEndPos
+                allowDismissedRecapture: isDragEnd,
+                dragStart: dragStartAtMouseUp,
+                dragEnd: dragEndAtMouseUp
             )
+            wasDragging = false
         }
         debounceItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
@@ -246,23 +319,11 @@ func runMonitor() {
     ) { notification in
         let frontApp = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
         let bundleID = frontApp?.bundleIdentifier ?? ""
-        if bundleID == "com.seleany.pro" || bundleID == lastAppBundleID {
+        if bundleID == ownBundleID || bundleID == lastAppBundleID {
             return
         }
 
         emitClearIfNeeded(frontApp: frontApp, mousePos: NSEvent.mouseLocation)
-    }
-
-    debugLog("Setting up timer...")
-    var tickCount = 0
-    Timer.scheduledTimer(withTimeInterval: 0.45, repeats: true) { _ in
-        tickCount += 1
-        if tickCount % 5 == 1 {  // log every 5th tick to reduce noise
-            let frontApp = NSWorkspace.shared.frontmostApplication
-            let bundleID = frontApp?.bundleIdentifier ?? "nil"
-            debugLog("Timer tick #\(tickCount): frontApp=\(bundleID)")
-        }
-        processSelection(canClear: false)
     }
 
     debugLog("Starting NSApplication run loop...")
@@ -356,7 +417,7 @@ func captureSelection(allowClipboard: Bool = false, dragStart: NSPoint = .zero, 
     // Try AX
     if let result = getSelectionViaAX(pid: pid, bundleID: bundleID, appName: appName, mousePos: mousePos) {
         debugLog("captureSelection: AX success, \(result.text.count) chars")
-        return result
+        return snapshotWithDragAnchor(result, dragStart: dragStart, dragEnd: dragEnd)
     }
     debugLog("captureSelection: AX failed for \(bundleID) pid=\(pid)")
 
@@ -369,7 +430,7 @@ func captureSelection(allowClipboard: Bool = false, dragStart: NSPoint = .zero, 
     ]
     if browsers.contains(bundleID) {
         if let result = getSelectionViaBrowser(bundleID: bundleID, appName: appName, mousePos: mousePos) {
-            return result
+            return snapshotWithDragAnchor(result, dragStart: dragStart, dragEnd: dragEnd)
         }
     }
 
@@ -377,19 +438,13 @@ func captureSelection(allowClipboard: Bool = false, dragStart: NSPoint = .zero, 
     guard allowClipboard else { return nil }
     debugLog("captureSelection: trying clipboard fallback")
     if let text = getSelectionViaClipboard() {
-        // Convert drag bounding box right-bottom corner to top-left origin.
-        // In AppKit coords: min(y) is the BOTTOM of the box (lower Y = lower on screen).
-        let anchorAppKit = NSPoint(
-            x: max(dragStart.x, dragEnd.x),
-            y: min(dragStart.y, dragEnd.y)
-        )
-        let anchorQuartz = appKitToQuartz(anchorAppKit)
-        let mouseQuartz = appKitToQuartz(dragEnd)
+        let drag = dragAnchor(start: dragStart, end: dragEnd)
+        let mouseQuartz = drag?.mouse ?? appKitToQuartz(dragEnd)
 
         debugLog("captureSelection: clipboard fallback success, \(text.count) chars, "
             + "dragStart=(\(Int(dragStart.x)),\(Int(dragStart.y))) "
             + "dragEnd=(\(Int(dragEnd.x)),\(Int(dragEnd.y))) "
-            + "anchor=(\(Int(anchorQuartz.x)),\(Int(anchorQuartz.y))) "
+            + "anchor=(\(Int(drag?.anchor.x ?? mouseQuartz.x)),\(Int(drag?.anchor.y ?? mouseQuartz.y))) "
             + "primaryH=\(Int(primaryDisplayHeight()))")
 
         return SelectionSnapshot(
@@ -401,8 +456,8 @@ func captureSelection(allowClipboard: Bool = false, dragStart: NSPoint = .zero, 
             method: "clipboard",
             mouseX: mouseQuartz.x,
             mouseY: mouseQuartz.y,
-            anchorX: anchorQuartz.x,
-            anchorY: anchorQuartz.y
+            anchorX: drag.map { Double($0.anchor.x) },
+            anchorY: drag.map { Double($0.anchor.y) }
         )
     }
 
@@ -603,17 +658,13 @@ func sendCommandKey(keyCode: CGKeyCode) {
 
 func getSelectionViaAX(pid: pid_t, bundleID: String, appName: String, mousePos: NSPoint) -> SelectionSnapshot? {
     guard let app = NSRunningApplication(processIdentifier: pid),
-          let selection = getAXSelectionContext(app: app) else {
+          let selection = getAXSelectionContext(app: app, mousePos: mousePos) else {
         return nil
     }
 
-    // Convert mouse position: NSEvent uses bottom-left origin, we want top-left
-    let screenHeight = NSScreen.main?.frame.height ?? 900
-    let mouseTopLeft = CGPoint(x: mousePos.x, y: screenHeight - mousePos.y)
-    let resolvedAnchor =
-        bundleID == "notion.id"
-        ? Optional(mouseTopLeft)
-        : selectionAnchor(for: selection, mousePos: mousePos)
+    // Convert mouse position: NSEvent uses bottom-left origin, Tauri uses top-left.
+    let mouseTopLeft = appKitToQuartz(mousePos)
+    let resolvedAnchor = selectionAnchor(for: selection, mousePos: mousePos) ?? mouseTopLeft
 
     return SelectionSnapshot(
         text: selection.text,
@@ -622,10 +673,10 @@ func getSelectionViaAX(pid: pid_t, bundleID: String, appName: String, mousePos: 
         url: "",
         editable: selection.editable,
         method: "ax",
-        mouseX: mousePos.x,
-        mouseY: screenHeight - mousePos.y,
-        anchorX: resolvedAnchor.map { Double($0.x) },
-        anchorY: resolvedAnchor.map { Double($0.y) }
+        mouseX: mouseTopLeft.x,
+        mouseY: mouseTopLeft.y,
+        anchorX: Double(resolvedAnchor.x),
+        anchorY: Double(resolvedAnchor.y)
     )
 }
 
@@ -642,7 +693,7 @@ func prefersPasteReplace(bundleID: String) -> Bool {
     return pasteFirstApps.contains(bundleID)
 }
 
-func getAXSelectionContext(app: NSRunningApplication) -> AXSelectionContext? {
+func getAXSelectionContext(app: NSRunningApplication, mousePos: NSPoint? = nil) -> AXSelectionContext? {
     let appElement = AXUIElementCreateApplication(app.processIdentifier)
 
     // Strategy 1: Try focused element first (fast path)
@@ -660,7 +711,9 @@ func getAXSelectionContext(app: NSRunningApplication) -> AXSelectionContext? {
         }
     }
 
-    // Strategy 2: Search all windows for text elements with selection
+    // Strategy 2: Search only the focused window and the window under the
+    // pointer. Searching every window can pick up stale selections from
+    // background windows in multi-window apps such as TextEdit.
     var windowsRef: CFTypeRef?
     let winResult = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
     guard winResult == .success, let windows = windowsRef as? [AXUIElement] else {
@@ -668,14 +721,36 @@ func getAXSelectionContext(app: NSRunningApplication) -> AXSelectionContext? {
         return nil
     }
 
-    debugLog("  AXContext: searching \(windows.count) windows for selected text")
-    for window in windows {
+    var candidateWindows: [AXUIElement] = []
+    if let focusedWindow = focusedWindow(for: appElement) {
+        candidateWindows.append(focusedWindow)
+    }
+    if let mousePos {
+        let mouseTopLeft = appKitToQuartz(mousePos)
+        candidateWindows.append(contentsOf: windows.filter { window in
+            guard let frame = frameForElement(window) else {
+                return false
+            }
+            return frame.insetBy(dx: -24, dy: -24).contains(mouseTopLeft)
+        })
+    }
+    if candidateWindows.isEmpty, windows.count == 1, let onlyWindow = windows.first {
+        candidateWindows.append(onlyWindow)
+    }
+
+    guard !candidateWindows.isEmpty else {
+        debugLog("  AXContext: no focused or pointer-matched window")
+        return nil
+    }
+
+    debugLog("  AXContext: searching \(candidateWindows.count) candidate windows for selected text")
+    for window in candidateWindows {
         if let ctx = findSelectedTextInTree(window, depth: 0) {
             return ctx
         }
     }
 
-    debugLog("  AXContext: no selected text in any window")
+    debugLog("  AXContext: no selected text in candidate windows")
     return nil
 }
 
@@ -714,29 +789,45 @@ func selectionAnchor(for selection: AXSelectionContext, mousePos: NSPoint) -> CG
         return nil
     }
 
-    let screenHeight = NSScreen.main?.frame.height ?? 900
-    let mouseTopLeft = CGPoint(x: mousePos.x, y: screenHeight - mousePos.y)
-    var candidates = [CGPoint(x: bounds.maxX, y: bounds.maxY)]
-    if let elementFrame = frameForElement(selection.element) {
-        candidates.append(
-            CGPoint(
-                x: elementFrame.minX + bounds.maxX,
-                y: elementFrame.minY + bounds.maxY
-            )
-        )
+    let mouseTopLeft = appKitToQuartz(mousePos)
+    let elementFrame = frameForElement(selection.element)
+    let windowFrame = windowFrameForElement(selection.element)
+
+    var candidateRects: [CGRect] = [bounds]
+    if let elementFrame {
+        candidateRects.append(bounds.offsetBy(dx: elementFrame.minX, dy: elementFrame.minY))
     }
-    if let windowFrame = windowFrameForElement(selection.element) {
-        candidates.append(
-            CGPoint(
-                x: windowFrame.minX + bounds.maxX,
-                y: windowFrame.minY + bounds.maxY
-            )
-        )
+    if let windowFrame {
+        candidateRects.append(bounds.offsetBy(dx: windowFrame.minX, dy: windowFrame.minY))
     }
 
-    return candidates.min { lhs, rhs in
-        squaredDistance(from: lhs, to: mouseTopLeft) < squaredDistance(from: rhs, to: mouseTopLeft)
+    let validRects = candidateRects.filter { rect in
+        guard rect.width > 0, rect.height > 0 else { return false }
+
+        let anchor = CGPoint(x: rect.maxX, y: rect.maxY)
+        if let windowFrame,
+           windowFrame.insetBy(dx: -80, dy: -80).contains(anchor) {
+            return true
+        }
+        if let elementFrame,
+           elementFrame.insetBy(dx: -80, dy: -80).contains(anchor) {
+            return true
+        }
+        return false
     }
+
+    let chosenRect = validRects.first ?? candidateRects.min { lhs, rhs in
+        let lhsAnchor = CGPoint(x: lhs.maxX, y: lhs.maxY)
+        let rhsAnchor = CGPoint(x: rhs.maxX, y: rhs.maxY)
+        return squaredDistance(from: lhsAnchor, to: mouseTopLeft) <
+            squaredDistance(from: rhsAnchor, to: mouseTopLeft)
+    }
+
+    guard let chosenRect else {
+        return nil
+    }
+
+    return CGPoint(x: chosenRect.maxX.rounded(), y: chosenRect.maxY.rounded())
 }
 
 func squaredDistance(from lhs: CGPoint, to rhs: CGPoint) -> CGFloat {
@@ -783,6 +874,20 @@ func focusedElement(for appElement: AXUIElement) -> AXUIElement? {
     }
 
     return nil
+}
+
+func focusedWindow(for appElement: AXUIElement) -> AXUIElement? {
+    var windowRef: CFTypeRef?
+    let result = AXUIElementCopyAttributeValue(
+        appElement,
+        kAXFocusedWindowAttribute as CFString,
+        &windowRef
+    )
+    guard result == .success, let windowRef else {
+        return nil
+    }
+
+    return (windowRef as! AXUIElement)
 }
 
 /// Recursively search for a text-capable element in the AX tree (max depth 6)
@@ -1112,7 +1217,7 @@ func getSelectionViaBrowser(bundleID: String, appName: String, mousePos: NSPoint
 
     guard let text = runAppleScript(scriptText), !text.isEmpty else { return nil }
     let url = urlScript.flatMap { runAppleScript($0) } ?? ""
-    let screenHeight = NSScreen.main?.frame.height ?? 900
+    let mouseQuartz = appKitToQuartz(mousePos)
 
     return SelectionSnapshot(
         text: text,
@@ -1121,8 +1226,8 @@ func getSelectionViaBrowser(bundleID: String, appName: String, mousePos: NSPoint
         url: url,
         editable: false,
         method: "applescript",
-        mouseX: mousePos.x,
-        mouseY: screenHeight - mousePos.y,
+        mouseX: mouseQuartz.x,
+        mouseY: mouseQuartz.y,
         anchorX: nil,
         anchorY: nil
     )

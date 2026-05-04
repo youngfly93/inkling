@@ -7,7 +7,6 @@ use std::process::Stdio;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager};
-use tauri_plugin_shell::ShellExt;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SelectionSnapshot {
@@ -65,24 +64,29 @@ static LAST_REPLACEMENT: Mutex<Option<ReplacementHistory>> = Mutex::new(None);
 
 #[tauri::command]
 pub async fn get_selection(app: tauri::AppHandle) -> Result<SelectionSnapshot, String> {
-    let sidecar = app
-        .shell()
-        .sidecar("selection-bridge")
-        .map_err(|e| format!("Failed to create sidecar: {}", e))?;
+    let bridge_path = resolve_bridge_path(&app);
 
-    let output = sidecar
-        .output()
-        .await
-        .map_err(|e| format!("Failed to run bridge: {}", e))?;
+    tokio::task::spawn_blocking(move || {
+        let output = StdCommand::new(&bridge_path)
+            .output()
+            .map_err(|e| format!("Failed to run bridge: {}", e))?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
-    if !output.status.success() {
-        return Err(stdout);
-    }
+        if !output.status.success() {
+            return Err(bridge_error_message(
+                &stdout,
+                &stderr,
+                "Selection bridge failed",
+            ));
+        }
 
-    serde_json::from_str::<SelectionSnapshot>(&stdout)
-        .map_err(|e| format!("Parse error: {} (raw: {})", e, stdout))
+        serde_json::from_str::<SelectionSnapshot>(&stdout)
+            .map_err(|e| format!("Parse error: {} (raw: {})", e, stdout))
+    })
+    .await
+    .map_err(|e| format!("Selection task failed: {}", e))?
 }
 
 #[tauri::command]
@@ -287,25 +291,30 @@ pub fn start_monitor(app: &tauri::AppHandle) {
             match serde_json::from_str::<SelectionSnapshot>(&line) {
                 Ok(snapshot) => {
                     if snapshot.method == "clear" || snapshot.text.trim().is_empty() {
-                        // Give actionbar clicks a short chance to claim focus, but do not
-                        // keep stale bars hanging around for the old 600ms delay.
+                        if super::windowing::is_clear_click_inside_actionbar(&handle, &snapshot) {
+                            eprintln!("Monitor: ignoring clear click inside actionbar");
+                            continue;
+                        }
+
+                        if super::windowing::is_actionbar_busy(&handle) {
+                            eprintln!("Monitor: skipping clear, actionbar is busy");
+                            continue;
+                        }
+
+                        eprintln!("Monitor: clearing action bar");
                         let h = handle.clone();
-                        tauri::async_runtime::spawn(async move {
-                            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
-                            if super::windowing::is_actionbar_busy(&h) {
-                                eprintln!("Monitor: skipping clear, actionbar is busy");
-                                return;
-                            }
-                            eprintln!("Monitor: clearing action bar");
-                            let main_handle = h.clone();
-                            let _ = h.run_on_main_thread(move || {
-                                super::windowing::close_action_bars(&main_handle);
-                            });
+                        let main_handle = h.clone();
+                        let _ = h.run_on_main_thread(move || {
+                            super::windowing::close_action_bars(&main_handle);
                         });
                         continue;
                     }
 
-                    eprintln!("Monitor: selection {} chars from {}", snapshot.text.len(), snapshot.app);
+                    eprintln!(
+                        "Monitor: selection {} chars from {}",
+                        snapshot.text.len(),
+                        snapshot.app
+                    );
                     let _ = handle.emit("selection-captured", &snapshot);
 
                     // Open action bar on main thread

@@ -1,10 +1,24 @@
 :root {
+  --ink-900: #464bf7;
+  --ink-800: #363bdc;
+  --ink-700: rgba(70, 75, 247, 0.7);
+  --ink-550: rgba(70, 75, 247, 0.55);
+  --ink-450: rgba(70, 75, 247, 0.45);
+  --ink-400: rgba(70, 75, 247, 0.4);
+  --ink-border: rgba(70, 75, 247, 0.1);
+  --ink-border-soft: rgba(70, 75, 247, 0.08);
+  --ink-border-faint: rgba(70, 75, 247, 0.06);
+  --surface-plain: #ffffff;
+  --surface-raised: rgba(255, 255, 255, 0.98);
+  --surface-card: rgba(255, 255, 255, 0.92);
+  --surface-subtle: #fafafa;
+  --surface-muted: #f7f7f7;
   --bg: #fafafa;
-  --fg: #1a1a1a;
-  --muted: #6b7280;
-  --border: #e5e7eb;
-  --accent: #3b82f6;
-  --surface: rgba(255, 255, 255, 0.8);
+  --fg: var(--ink-900);
+  --muted: var(--ink-550);
+  --border: var(--ink-border-soft);
+  --accent: var(--ink-900);
+  --surface: var(--surface-raised);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   color: var(--fg);
   background: var(--bg);
@@ -12,15 +26,20 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1a1a1a;
-    --fg: #e5e7eb;
-    --muted: #9ca3af;
-    --border: #374151;
-    --surface: rgba(30, 30, 30, 0.85);
+    --bg: #fafafa;
+    --fg: var(--ink-900);
+    --muted: var(--ink-550);
+    --border: var(--ink-border-soft);
+    --surface: var(--surface-raised);
   }
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
+
+*:focus-visible {
+  outline: 2px solid var(--ink-900);
+  outline-offset: 2px;
+}
 
 body {
   overflow: hidden;
@@ -44,7 +63,6 @@ html.actionbar-window #root {
   pointer-events: auto;
   -webkit-app-region: no-drag;
   overflow: visible !important;
-  /* only transition paint-cheap props; transform handled by motion */
   transition: background 160ms ease;
   transform: translateZ(0);
   backface-visibility: hidden;
@@ -52,45 +70,38 @@ html.actionbar-window #root {
 }
 
 .dock-icon {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   border: none;
-  background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(248,250,252,0.9));
+  background: transparent;
   appearance: none;
   -webkit-appearance: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
+  border-radius: 9px;
   cursor: pointer;
-  /* keep transitions minimal: background + border swap on hover; box-shadow is expensive */
   transition:
     background 120ms ease,
-    border-color 120ms ease;
-  color: var(--fg);
+    color 120ms ease;
+  color: var(--ink-900);
   overflow: visible !important;
-  border: 1px solid rgba(226,232,240,0.95);
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.82),
-    0 2px 6px rgba(15,23,42,0.06);
+  box-shadow: none;
   backface-visibility: hidden;
   contain: layout style;
 }
 
 .dock-icon:hover,
 .dock-icon-hovered {
-  background: linear-gradient(180deg, rgba(255,255,255,1), rgba(241,245,249,0.95));
-  border-color: rgba(203,213,225,0.98);
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.92),
-    0 8px 18px rgba(15,23,42,0.08);
+  background: var(--ink-900);
+  color: var(--surface-plain);
+  box-shadow: none;
 }
 
 .dock-icon:active {
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.55),
-    0 4px 10px rgba(15,23,42,0.08);
+  background: var(--ink-800);
+  box-shadow: none;
 }
 
 input, textarea {
@@ -108,9 +119,7 @@ input, textarea {
   height: 100vh;
   overflow-y: auto;
   padding: 28px 28px 32px;
-  background:
-    radial-gradient(circle at top right, rgba(59, 130, 246, 0.14), transparent 32%),
-    linear-gradient(180deg, rgba(255,255,255,0.92), rgba(245,247,250,0.96));
+  background: linear-gradient(180deg, var(--surface-subtle) 0%, var(--surface-muted) 100%);
 }
 
 .settings-hero {
@@ -151,12 +160,10 @@ input, textarea {
 
 .settings-readiness-card,
 .settings-panel {
-  background: rgba(255,255,255,0.78);
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 22px;
-  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: var(--surface-card);
+  border: 1px solid var(--ink-border-soft);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
   padding: 18px 18px 20px;
   margin-bottom: 16px;
 }
@@ -187,9 +194,9 @@ input, textarea {
   gap: 10px;
   align-items: flex-start;
   padding: 12px 12px 13px;
-  border-radius: 14px;
-  background: rgba(255,255,255,0.72);
-  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  border: 1px solid var(--ink-border-faint);
 }
 
 .settings-status-dot {
@@ -261,18 +268,18 @@ input, textarea {
 .settings-primary-btn,
 .settings-secondary-btn {
   border: none;
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 10px 16px;
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  transition: transform 0.15s, box-shadow 0.15s, background 0.15s;
+  transition: box-shadow 0.15s, background 0.15s, border-color 0.15s;
 }
 
 .settings-primary-btn {
-  background: linear-gradient(135deg, #2563eb, #3b82f6);
-  color: white;
-  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.22);
+  background: var(--ink-900);
+  color: var(--surface-plain);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.12) inset, 0 2px 8px rgba(0,0,0,0.18);
 }
 
 .settings-primary-btn:disabled {
@@ -281,14 +288,17 @@ input, textarea {
 }
 
 .settings-secondary-btn {
-  background: rgba(255,255,255,0.74);
+  background: rgba(255,255,255,0.86);
   color: var(--fg);
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  border: 1px solid var(--ink-border);
 }
 
-.settings-primary-btn:hover,
+.settings-primary-btn:hover {
+  box-shadow: 0 1px 0 rgba(255,255,255,0.12) inset, 0 3px 10px rgba(0,0,0,0.2);
+}
+
 .settings-secondary-btn:hover {
-  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
 }
 
 .settings-matrix {
@@ -303,9 +313,9 @@ input, textarea {
   justify-content: space-between;
   gap: 16px;
   padding: 12px 14px;
-  border-radius: 14px;
-  background: rgba(255,255,255,0.68);
-  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  border: 1px solid var(--ink-border-faint);
 }
 
 .settings-tips {
@@ -316,16 +326,16 @@ input, textarea {
 
 .settings-tip {
   padding: 11px 12px;
-  border-radius: 14px;
-  background: rgba(255,255,255,0.68);
-  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  border: 1px solid var(--ink-border-faint);
   font-size: 13px;
 }
 
 .settings-inline-error {
   margin-top: 12px;
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: 8px;
   background: rgba(220, 38, 38, 0.08);
   border: 1px solid rgba(220, 38, 38, 0.14);
   font-size: 12px;
@@ -370,19 +380,21 @@ input, textarea {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  background: var(--surface-muted);
 }
 
 .library-search {
-  padding: 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--ink-border-soft);
+  background: rgba(255,255,255,0.9);
 }
 
 .library-search input {
   width: 100%;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
+  padding: 9px 12px;
+  border: 1px solid var(--ink-border);
   border-radius: 8px;
-  background: var(--bg);
+  background: var(--surface-plain);
   color: var(--fg);
   font-size: 13px;
   outline: none;
@@ -394,14 +406,15 @@ input, textarea {
 }
 
 .sentence-row {
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--ink-border-faint);
   cursor: default;
   transition: background 0.15s;
+  background: var(--surface-plain);
 }
 
 .sentence-row:hover {
-  background: var(--surface);
+  background: var(--surface-muted);
 }
 
 .sentence-text {
@@ -423,9 +436,9 @@ input, textarea {
 }
 
 .sentence-meta .tag {
-  background: var(--border);
-  padding: 1px 5px;
-  border-radius: 3px;
+  background: var(--ink-border-faint);
+  padding: 2px 6px;
+  border-radius: 5px;
 }
 
 .library-empty {
@@ -441,9 +454,10 @@ input, textarea {
 
 .library-status {
   padding: 6px 14px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--ink-border-soft);
   font-size: 11px;
   color: var(--muted);
+  background: rgba(255,255,255,0.9);
 }
 
 .btn-icon {
