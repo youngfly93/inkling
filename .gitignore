@@ -17,6 +17,11 @@ dist-ssr
 src-tauri/target
 *.local
 
+# Local design references and generated concept art
+icon.svg
+inkling_design*.zip
+inkling_icon_concept.png
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
