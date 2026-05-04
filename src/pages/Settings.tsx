@@ -28,8 +28,8 @@ const SUPPORT_MATRIX = [
 
 const QUICK_TIPS = [
   "Keep the original text highlighted until Replace finishes.",
-  "If Replace is hidden, Seleany considers the current surface read-only.",
-  "If the source selection changes before Replace, Seleany now blocks the write-back instead of guessing.",
+  "If Replace is hidden, Inkling considers the current surface read-only.",
+  "If the source selection changes before Replace, Inkling blocks the write-back instead of guessing.",
 ];
 
 interface RuntimeStatus {
@@ -109,15 +109,15 @@ export default function SettingsPage() {
       label: "Accessibility permission",
       ok: !!status?.accessibilityTrusted,
       detail: status?.accessibilityTrusted
-        ? "Granted. Seleany can monitor selections and write back in supported editors."
-        : "Missing. Enable Seleany under System Settings > Privacy & Security > Accessibility.",
+        ? "Granted. Inkling can monitor selections and write back in supported editors."
+        : "Missing. Enable Inkling under System Settings > Privacy & Security > Accessibility.",
     },
     {
       label: "Kimi API key",
       ok: !!status?.kimiApiKeyConfigured,
       detail: status?.kimiApiKeyConfigured
         ? "Configured. AI actions can reach Kimi."
-        : "Missing. Add a Kimi API key below before using To English, To Chinese, or Expand.",
+        : "Missing. Add a Kimi API key below before using Translate, Polish, Grammar, Explain, Summarize, or Ask AI.",
     },
     {
       label: "Native selection bridge",
@@ -134,10 +134,10 @@ export default function SettingsPage() {
     <div className="settings-shell">
       <div className="settings-hero">
         <div>
-          <div className="settings-kicker">Seleany Pro</div>
+          <div className="settings-kicker">Inkling</div>
           <h1>Setup and support</h1>
           <p>
-            Seleany works best when it can both read a live selection and write back into editable
+            Inkling works best when it can both read a live selection and write back into editable
             text fields. This screen shows whether the runtime is ready, how Replace behaves, and
             which surfaces are intentionally copy-only.
           </p>

@@ -6,10 +6,7 @@ use tauri::{
     image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{TrayIcon, TrayIconBuilder},
-    ActivationPolicy,
-    Manager,
-    RunEvent,
-    WindowEvent,
+    ActivationPolicy, Manager, RunEvent, WindowEvent,
 };
 
 static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
@@ -57,8 +54,6 @@ pub fn run() {
                 _ => {}
             }
         })
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(
             tauri_plugin_sql::Builder::default()
@@ -71,8 +66,7 @@ pub fn run() {
 
             // Build tray menu
             let settings_item = MenuItemBuilder::with_id("settings", "Settings").build(app)?;
-            let library_item =
-                MenuItemBuilder::with_id("library", "Sentence Library").build(app)?;
+            let library_item = MenuItemBuilder::with_id("library", "Inkling Library").build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
 
             let menu = MenuBuilder::new(app)
@@ -122,8 +116,9 @@ pub fn run() {
             commands::windowing::get_current_selection,
             commands::windowing::get_cursor_position,
             commands::windowing::set_actionbar_busy,
+            commands::windowing::dismiss_action_bar,
+            commands::windowing::set_actionbar_input_mode,
             commands::windowing::open_settings_window,
-            commands::library::save_sentence,
             commands::settings::get_setting,
             commands::settings::set_setting,
             commands::settings::get_runtime_status,

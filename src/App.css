@@ -44,7 +44,6 @@ html.actionbar-window #root {
   pointer-events: auto;
   -webkit-app-region: no-drag;
   overflow: visible !important;
-  /* only transition paint-cheap props; transform handled by motion */
   transition: background 160ms ease;
   transform: translateZ(0);
   backface-visibility: hidden;
@@ -52,45 +51,38 @@ html.actionbar-window #root {
 }
 
 .dock-icon {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   border: none;
-  background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(248,250,252,0.9));
+  background: transparent;
   appearance: none;
   -webkit-appearance: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
+  border-radius: 9px;
   cursor: pointer;
-  /* keep transitions minimal: background + border swap on hover; box-shadow is expensive */
   transition:
     background 120ms ease,
-    border-color 120ms ease;
-  color: var(--fg);
+    color 120ms ease;
+  color: #0a0a0a;
   overflow: visible !important;
-  border: 1px solid rgba(226,232,240,0.95);
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.82),
-    0 2px 6px rgba(15,23,42,0.06);
+  box-shadow: none;
   backface-visibility: hidden;
   contain: layout style;
 }
 
 .dock-icon:hover,
 .dock-icon-hovered {
-  background: linear-gradient(180deg, rgba(255,255,255,1), rgba(241,245,249,0.95));
-  border-color: rgba(203,213,225,0.98);
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.92),
-    0 8px 18px rgba(15,23,42,0.08);
+  background: #0a0a0a;
+  color: #ffffff;
+  box-shadow: none;
 }
 
 .dock-icon:active {
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.55),
-    0 4px 10px rgba(15,23,42,0.08);
+  background: #1f1f1f;
+  box-shadow: none;
 }
 
 input, textarea {

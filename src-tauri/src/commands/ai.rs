@@ -26,22 +26,40 @@ struct ChatResponse {
 
 fn build_transform_prompt(text: &str, action: &str) -> Result<String, String> {
     match action {
-        "to_english" => Ok(format!(
-            "Rewrite the following text into natural, polished English. \
-             Preserve the original meaning. Do not invent facts. \
-             Return only the rewritten text.\n\nText: {}",
+        "translate" => Ok(format!(
+            "Translate the following selected text. \
+             If the text is primarily Chinese, translate it into natural, polished English. \
+             Otherwise, translate it into natural, polished Simplified Chinese. \
+             Preserve meaning, names, numbers, formatting, and tone. Do not invent facts. \
+             Return only the translated text.\n\nSelected text:\n{}",
             text
         )),
-        "to_chinese" => Ok(format!(
-            "将以下文本翻译为自然、流畅的简体中文。\
-             保留原文含义，不要编造内容。\
-             仅返回翻译后的中文文本。\n\n文本：{}",
+        "polish" => Ok(format!(
+            "Polish the following selected text in the same language. \
+             Make it clearer, smoother, and more natural while preserving the original meaning and tone. \
+             Do not expand with new facts. \
+             Return only the polished text.\n\nSelected text:\n{}",
             text
         )),
-        "expand" => Ok(format!(
-            "Expand the following text into a fuller, clearer, and more polished version. \
-             Keep the original intent and tone. Do not add fabricated facts. \
-             Return only the expanded text.\n\nText: {}",
+        "grammar" => Ok(format!(
+            "Correct grammar, spelling, punctuation, and awkward phrasing in the following selected text. \
+             Keep the same language, meaning, structure, and tone as much as possible. \
+             Make only necessary corrections. \
+             Return only the corrected text.\n\nSelected text:\n{}",
+            text
+        )),
+        "explain" => Ok(format!(
+            "Explain the following selected text clearly and concisely. \
+             Identify the main point, important context, and any terms that may be hard to understand. \
+             Use the same language as the selected text unless another language is clearly more useful. \
+             Return only the explanation.\n\nSelected text:\n{}",
+            text
+        )),
+        "summarize" => Ok(format!(
+            "Summarize the following selected text into a concise, useful summary. \
+             Keep the key points and avoid adding information that is not present in the text. \
+             Use the same language as the selected text. \
+             Return only the summary.\n\nSelected text:\n{}",
             text
         )),
         _ => Err(format!("Unknown action: {}", action)),
@@ -58,16 +76,6 @@ fn build_custom_prompt(text: &str, mode: &str, instruction: &str) -> Result<Stri
              Return only the answer.\n\n\
              Selected text:\n{}\n\n\
              User question:\n{}",
-            text, instruction
-        )),
-        "improve" => Ok(format!(
-            "You are rewriting selected text from another app.\n\
-             Follow the user's instruction exactly.\n\
-             Preserve factual meaning unless the user explicitly asks for structural changes.\n\
-             Do not add fabricated facts.\n\
-             Return only the rewritten text.\n\n\
-             Selected text:\n{}\n\n\
-             Rewrite instruction:\n{}",
             text, instruction
         )),
         _ => Err(format!("Unknown custom mode: {}", mode)),

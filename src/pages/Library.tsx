@@ -72,6 +72,29 @@ export default function LibraryPage() {
     return parts[parts.length - 1] || bundleId;
   }
 
+  function formatTransformType(type: string): string {
+    switch (type) {
+      case "translate":
+        return "Translate";
+      case "polish":
+        return "Polish";
+      case "grammar":
+        return "Grammar";
+      case "explain":
+        return "Explain";
+      case "summarize":
+        return "Summarize";
+      case "to_english":
+        return "To English";
+      case "to_chinese":
+        return "To Chinese";
+      case "expand":
+        return "Expand";
+      default:
+        return type;
+    }
+  }
+
   return (
     <div className="library-container">
       <div className="library-search">
@@ -89,7 +112,7 @@ export default function LibraryPage() {
           <span style={{ fontSize: 36, opacity: 0.5 }}>📚</span>
           <span>{search ? "No matches" : "No saved sentences yet"}</span>
           <span style={{ fontSize: 12 }}>
-            Select text anywhere → Save from the floating bar
+            {"Select text anywhere -> run an Inkling action"}
           </span>
         </div>
       ) : (
@@ -189,13 +212,7 @@ export default function LibraryPage() {
                         }}
                       >
                         <span style={{ fontWeight: 600 }}>
-                          {t.transform_type === "to_english"
-                            ? "To English"
-                            : t.transform_type === "to_chinese"
-                            ? "To Chinese"
-                            : t.transform_type === "expand"
-                            ? "Expand"
-                            : t.transform_type}
+                          {formatTransformType(t.transform_type)}
                         </span>
                         <span>{formatDate(t.created_at)}</span>
                       </div>
