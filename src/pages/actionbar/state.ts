@@ -58,6 +58,10 @@ export type PanelAction =
   | { type: "undoSuccess" }
   | { type: "markReplaceNotApplied" };
 
+function assertNever(action: never): never {
+  throw new Error(`Unhandled panel action: ${JSON.stringify(action)}`);
+}
+
 export function panelReducer(state: PanelState, action: PanelAction): PanelState {
   switch (action.type) {
     case "selectionReady":
@@ -175,6 +179,6 @@ export function panelReducer(state: PanelState, action: PanelAction): PanelState
       };
 
     default:
-      return state;
+      return assertNever(action);
   }
 }

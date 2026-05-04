@@ -17,6 +17,7 @@ import {
   panelTitleStyle,
   preventButtonFocus,
   sourcePreviewStyle,
+  ui,
 } from "./styles";
 import type { ActionId, ResultTone } from "./types";
 
@@ -75,7 +76,7 @@ export function ResultPanel({
       style={panelSurfaceStyle()}
     >
       <div style={panelHeaderStyle()}>
-        <div style={panelIconBadgeStyle(resultTone === "error" ? "#b91c1c" : "#0a0a0a")}>
+        <div style={panelIconBadgeStyle(resultTone === "error" ? ui.color.error : ui.color.ink)}>
           {resultTone === "error" ? <AlertCircle size={13} /> : activeAction?.icon}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -105,7 +106,7 @@ export function ResultPanel({
         <div
           style={{
             marginTop: 6,
-            color: resultTone === "error" ? "#991b1b" : "#0a0a0a",
+            color: resultTone === "error" ? ui.color.errorText : ui.color.ink,
             fontSize: isErrorResult ? 13 : 14,
             lineHeight: 1.55,
             maxHeight: 190,
@@ -140,7 +141,7 @@ export function ResultPanel({
         )}
         <div style={{ flex: 1 }} />
         {replaceApplied && (
-          <button type="button" onMouseDown={preventButtonFocus} onClick={onUndo} style={panelPrimaryButtonStyle("#1f1f1f")}>
+          <button type="button" onMouseDown={preventButtonFocus} onClick={onUndo} style={panelPrimaryButtonStyle(ui.color.inkStrong)}>
             {loading === "undo" ? "Undoing..." : "Undo"}
           </button>
         )}

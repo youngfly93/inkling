@@ -1,15 +1,13 @@
 import React, { useRef } from "react";
 import { Loader2 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 import { DOCK_SIZE } from "./constants";
-import { preventButtonFocus } from "./styles";
+import { preventButtonFocus, ui } from "./styles";
 
 interface DockIconProps {
   id: string;
   children: React.ReactNode;
   label: string;
-  cn: string;
-  shortcut: string;
   hovered: boolean;
   isLoading: boolean;
   onHoverChange: (id: string, hovered: boolean) => void;
@@ -21,8 +19,6 @@ export const DockIcon = React.memo(function DockIcon({
   id,
   children,
   label,
-  cn,
-  shortcut,
   hovered,
   isLoading,
   onHoverChange,
@@ -32,57 +28,7 @@ export const DockIcon = React.memo(function DockIcon({
   const ref = useRef<HTMLButtonElement | null>(null);
 
   return (
-    <div style={{ position: "relative", display: "flex", alignItems: "flex-end" }}>
-      <AnimatePresence>
-        {hovered && (
-          <motion.div
-            initial={{ opacity: 0, y: 2, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 2, scale: 0.98 }}
-            transition={{
-              type: "spring",
-              mass: 0.2,
-              stiffness: 360,
-              damping: 30,
-            }}
-            style={{
-              position: "absolute",
-              bottom: "calc(100% + 10px)",
-              left: "50%",
-              transform: "translateX(-50%)",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 2,
-              padding: "5px 8px",
-              borderRadius: 10,
-              background: "#ffffff",
-              backdropFilter: "blur(12px)",
-              WebkitBackdropFilter: "blur(12px)",
-              border: "1px solid rgba(10,10,10,0.1)",
-              color: "#0a0a0a",
-              fontSize: 11,
-              fontWeight: 600,
-              whiteSpace: "nowrap",
-              pointerEvents: "none",
-              zIndex: 10,
-              boxShadow: "0 8px 18px rgba(0,0,0,0.09)",
-            }}
-          >
-            <span>{label}</span>
-            <span
-              style={{
-                color: "rgba(10,10,10,0.46)",
-                fontSize: 10,
-                fontWeight: 500,
-                lineHeight: 1,
-              }}
-            >
-              {cn} · {shortcut}
-            </span>
-          </motion.div>
-        )}
-      </AnimatePresence>
+    <div style={{ display: "flex", alignItems: "flex-end" }}>
       <motion.button
         ref={(node) => {
           ref.current = node;
@@ -92,11 +38,11 @@ export const DockIcon = React.memo(function DockIcon({
         className={`dock-icon ${hovered ? "dock-icon-hovered" : ""}`}
         animate={{ scale: hovered ? 1.02 : 1 }}
         whileTap={{ scale: 0.96 }}
-        transition={{ type: "spring", mass: 0.18, stiffness: 380, damping: 28 }}
+        transition={{ duration: 0.12, ease: "easeOut" }}
         style={{
           width: DOCK_SIZE,
           height: DOCK_SIZE,
-          color: hovered ? "#ffffff" : "#0a0a0a",
+          color: hovered ? ui.color.white : ui.color.ink,
           willChange: "transform",
           backfaceVisibility: "hidden",
         }}
@@ -116,7 +62,7 @@ export const DockIcon = React.memo(function DockIcon({
             justifyContent: "center",
           }}
         >
-          {isLoading ? <Loader2 size={15} className="spin" /> : children}
+          {isLoading ? <Loader2 size={13} className="spin" /> : children}
         </motion.div>
       </motion.button>
     </div>

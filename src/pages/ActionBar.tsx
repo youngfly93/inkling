@@ -28,6 +28,7 @@ import {
 } from "./actionbar/actions";
 import {
   preventButtonFocus,
+  ui,
 } from "./actionbar/styles";
 import type {
   Selection,
@@ -357,9 +358,9 @@ export default function ActionBar() {
             position: "relative",
             width: 10,
             height: 10,
-            borderRadius: 999,
+            borderRadius: ui.radius.pill,
             border: "none",
-            background: "#0a0a0a",
+            background: ui.color.ink,
             boxShadow: orbHovered
               ? "0 3px 8px rgba(0,0,0,0.18)"
               : "0 2px 6px rgba(0,0,0,0.14)",
@@ -388,8 +389,8 @@ export default function ActionBar() {
             gap: 5,
             padding: "7px",
             borderRadius: 18,
-            background: "#ffffff",
-            border: "1px solid rgba(10,10,10,0.09)",
+            background: ui.color.white,
+            border: `1px solid ${ui.color.border}`,
             boxShadow: "0 6px 16px rgba(0,0,0,0.08)",
             willChange: "transform",
             transform: "translateZ(0)",
@@ -399,8 +400,6 @@ export default function ActionBar() {
           <DockIcon
             id="ask"
             label="Ask AI"
-            cn="询问"
-            shortcut="A"
             hovered={hoveredAction === "ask"}
             isLoading={loading === "ask"}
             onHoverChange={handleActionHover}
@@ -415,7 +414,7 @@ export default function ActionBar() {
               alignSelf: "center",
               width: 1,
               height: 18,
-              background: "rgba(10,10,10,0.1)",
+              background: ui.color.border,
               marginRight: 1,
             }}
           />
@@ -424,8 +423,6 @@ export default function ActionBar() {
               key={a.id}
               id={a.id}
               label={a.label}
-              cn={a.cn}
-              shortcut={a.shortcut}
               hovered={hoveredAction === a.id}
               isLoading={loading === a.id}
               onHoverChange={handleActionHover}
