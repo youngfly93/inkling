@@ -3,13 +3,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { motion } from "motion/react";
-import { saveSentence as dbSave, saveTransform } from "../services/db";
 import {
   DOCK_WINDOW_HEIGHT,
   DOCK_WINDOW_WIDTH,
   ORB_WINDOW_HEIGHT,
   ORB_WINDOW_WIDTH,
-  PANEL_WINDOW_WIDTH,
   SURFACE_PADDING_BOTTOM,
   SURFACE_PADDING_TOP,
   SURFACE_PADDING_X,
@@ -21,15 +19,10 @@ import { AskIcon } from "./actionbar/icons";
 import { getElementScreenCenter, getSourceName } from "./actionbar/selection";
 import { useActionbarWindow } from "./actionbar/useActionbarWindow";
 import { useDockHover } from "./actionbar/useDockHover";
-import { initialPanelState, panelReducer, type RevealPanelPayload } from "./actionbar/state";
+import { useActionbarActions } from "./actionbar/useActionbarActions";
+import { initialPanelState, panelReducer } from "./actionbar/state";
 import {
-  actionLabel,
-  actionResultKind,
-  actionStatus,
   ASK_ACTION,
-  canReplaceAction,
-  describeReplaceError,
-  describeTransformError,
   DOCK_ACTIONS,
   wordTransitionLabel,
 } from "./actionbar/actions";
@@ -39,7 +32,6 @@ import {
 import type {
   Selection,
   SurfaceMode,
-  TransformActionId,
 } from "./actionbar/types";
 
 export default function ActionBar() {
@@ -64,8 +56,6 @@ export default function ActionBar() {
     askQuestion,
   } = panel;
   const text = sel.text;
-  const app = sel.app;
-  const url = sel.url;
   const sourceName = getSourceName(sel);
   const hasResult = !!result;
   const isErrorResult = !!result && resultTone === "error";
@@ -92,6 +82,27 @@ export default function ActionBar() {
     syncDockHoverFromClientPoint,
     syncDockHoverFromSelection,
   } = useDockHover({ surfaceMode, hasResult, askPanelOpen });
+  const {
+    runAI,
+    copyText,
+    replaceResult,
+    undoLastReplace,
+    openSettings,
+    openAskPanel,
+    submitAsk,
+  } = useActionbarActions({
+    selection: sel,
+    sourceName,
+    loading,
+    result,
+    askQuestion,
+    dispatchPanel,
+    resizeActionBarWindow,
+    setSurfaceMode,
+    setOrbHovered,
+    clearDockHover,
+    askInputRef,
+  });
 
   useEffect(() => {
     const html = document.documentElement;
@@ -141,16 +152,6 @@ export default function ActionBar() {
     return () => window.clearTimeout(timeoutId);
   }, [surfaceMode, orbHovered, loading, result, askPanelOpen, sel.text]);
 
-  async function revealPanel(payload: RevealPanelPayload) {
-    (document.activeElement as HTMLElement | null)?.blur?.();
-    await invoke("set_actionbar_input_mode", { enabled: false }).catch(() => {});
-    setSurfaceMode("dock");
-    setOrbHovered(false);
-    dispatchPanel({ type: "revealPanel", payload });
-    await resizeActionBarWindow(PANEL_WINDOW_WIDTH, payload.height ?? 340, { anchor: "top-left" });
-    await getCurrentWindow().show();
-  }
-
   function resetInlinePanels() {
     dispatchPanel({ type: "resetInlinePanels" });
   }
@@ -178,24 +179,6 @@ export default function ActionBar() {
     setSurfaceMode("orb");
     await resizeActionBarWindow(ORB_WINDOW_WIDTH, ORB_WINDOW_HEIGHT, { anchor: "surface-top-left-to-point-center" });
     await getCurrentWindow().show();
-  }
-
-  async function loadAIConfig() {
-    const apiKey = await invoke<string | null>("get_setting", {
-      key: "kimi_api_key",
-    });
-    const apiHost = await invoke<string | null>("get_setting", {
-      key: "kimi_api_host",
-    });
-    const model = await invoke<string | null>("get_setting", {
-      key: "kimi_model",
-    });
-
-    return {
-      apiKey: (apiKey || "").trim(),
-      apiHost: apiHost || "api.moonshot.cn",
-      model: model || "moonshot-v1-8k",
-    };
   }
 
   useEffect(() => {
@@ -285,226 +268,6 @@ export default function ActionBar() {
       window.removeEventListener("keydown", onKey);
     };
   }, [askPanelOpen, isErrorResult, loading, replaceApplied, result, resultCanReplace, surfaceMode]);
-
-  async function runAI(actionId: TransformActionId) {
-    dispatchPanel({ type: "beginTransform", loading: actionId });
-    await invoke("set_actionbar_busy", { busy: true });
-    try {
-      const config = await loadAIConfig();
-
-      if (!config.apiKey) {
-        await revealPanel({
-          title: "Kimi API key is missing",
-          body: "Open Settings from the menu bar and add your Kimi key before running Inkling actions.",
-          tone: "error",
-          status: "AI actions stay unavailable until the key is configured.",
-          showSettings: true,
-          height: 300,
-          kind: "error",
-          actionId,
-        });
-        return;
-      }
-
-      const output = await invoke<string>("transform_text", {
-        text,
-        action: actionId,
-        apiKey: config.apiKey,
-        apiHost: config.apiHost,
-        model: config.model,
-      });
-
-      // Save transform to db
-      try {
-        const sentenceId = await dbSave(text, app || null, url || null);
-        await saveTransform(sentenceId, actionId, text, output, config.model);
-      } catch (_) { /* best effort */ }
-
-      await revealPanel({
-        title: `${actionLabel(actionId)} ready`,
-        body: output,
-        tone: "neutral",
-        status: actionStatus(actionId, sel.editable, sourceName),
-        height: 360,
-        canReplace: canReplaceAction(actionId, sel.editable),
-        kind: actionResultKind(actionId),
-        actionId,
-      });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      console.error("AI error:", e);
-      const friendly = describeTransformError(message);
-      await revealPanel({
-        title: friendly.title,
-        body: friendly.detail,
-        tone: "error",
-        status: friendly.status,
-        showSettings: friendly.showSettingsCta,
-        height: 320,
-        kind: "error",
-        actionId,
-      });
-      dispatchPanel({ type: "markReplaceNotApplied" });
-    } finally {
-      dispatchPanel({ type: "setLoading", loading: null });
-      await invoke("set_actionbar_busy", { busy: false });
-    }
-  }
-
-  function copyText() {
-    void invoke("set_actionbar_busy", { busy: false });
-    navigator.clipboard.writeText(result || text);
-    dispatchPanel({ type: "setCopied", copied: true });
-    setTimeout(() => dispatchPanel({ type: "setCopied", copied: false }), 1200);
-  }
-
-  async function replaceResult() {
-    if (!result) {
-      return;
-    }
-
-    dispatchPanel({ type: "setLoading", loading: "replace" });
-    await invoke("set_actionbar_busy", { busy: true });
-    try {
-      await invoke("replace_selection", {
-        text: result,
-        originalText: text,
-        targetApp: app || null,
-      });
-      dispatchPanel({ type: "replaceSuccess" });
-      await getCurrentWindow().show();
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      console.error("Replace error:", e);
-      const friendly = describeReplaceError(message, sourceName);
-      dispatchPanel({
-        type: "replaceError",
-        title: friendly.title,
-        detail: friendly.detail,
-        status: friendly.status,
-      });
-      await resizeActionBarWindow(PANEL_WINDOW_WIDTH, 348, { anchor: "top-left" });
-    } finally {
-      dispatchPanel({ type: "setLoading", loading: null });
-      await invoke("set_actionbar_busy", { busy: false });
-    }
-  }
-
-  async function undoLastReplace() {
-    dispatchPanel({ type: "setLoading", loading: "undo" });
-    await invoke("set_actionbar_busy", { busy: true });
-    try {
-      await invoke("undo_last_replace");
-      dispatchPanel({ type: "undoSuccess" });
-      await getCurrentWindow().hide();
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      console.error("Undo error:", e);
-      await revealPanel({
-        title: "Undo didn’t complete",
-        body: message,
-        tone: "error",
-        status: "If the source app changed state, re-select the text and try again.",
-        height: 300,
-        kind: "error",
-      });
-    } finally {
-      dispatchPanel({ type: "setLoading", loading: null });
-      await invoke("set_actionbar_busy", { busy: false });
-    }
-  }
-
-  async function openSettings() {
-    await invoke("open_settings_window");
-    await getCurrentWindow().hide();
-  }
-
-  async function openAskPanel() {
-    const win = getCurrentWindow();
-    setSurfaceMode("dock");
-    setOrbHovered(false);
-    dispatchPanel({ type: "openAskPanel" });
-    clearDockHover();
-    await resizeActionBarWindow(PANEL_WINDOW_WIDTH, 318, { anchor: "top-left" });
-    await win.show();
-    await invoke("set_actionbar_input_mode", { enabled: true });
-    window.requestAnimationFrame(() => {
-      askInputRef.current?.focus({ preventScroll: true });
-      window.requestAnimationFrame(() => {
-        askInputRef.current?.focus({ preventScroll: true });
-      });
-    });
-  }
-
-  async function submitAsk() {
-    const question = askQuestion.trim();
-    if (!question || loading) {
-      askInputRef.current?.focus();
-      return;
-    }
-
-    dispatchPanel({ type: "beginTransform", loading: "ask" });
-    await invoke("set_actionbar_busy", { busy: true });
-    try {
-      const config = await loadAIConfig();
-
-      if (!config.apiKey) {
-        await revealPanel({
-          title: "Kimi API key is missing",
-          body: "Open Settings from the menu bar and add your Kimi key before asking Inkling.",
-          tone: "error",
-          status: "Ask AI stays unavailable until the key is configured.",
-          showSettings: true,
-          height: 300,
-          kind: "error",
-          actionId: "ask",
-        });
-        return;
-      }
-
-      const output = await invoke<string>("custom_text_action", {
-        text,
-        mode: "ask",
-        instruction: question,
-        apiKey: config.apiKey,
-        apiHost: config.apiHost,
-        model: config.model,
-      });
-
-      try {
-        const sentenceId = await dbSave(text, app || null, url || null);
-        await saveTransform(sentenceId, "ask", `${text}\n\nQ: ${question}`, output, config.model);
-      } catch (_) { /* best effort */ }
-
-      await revealPanel({
-        title: "Ask AI answered",
-        body: output,
-        tone: "neutral",
-        status: "Answer based on the selected text and your question.",
-        height: 380,
-        canReplace: false,
-        kind: "answer",
-        actionId: "ask",
-      });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      console.error("Ask AI error:", e);
-      const friendly = describeTransformError(message);
-      await revealPanel({
-        title: friendly.title,
-        body: friendly.detail,
-        tone: "error",
-        status: friendly.status,
-        showSettings: friendly.showSettingsCta,
-        height: 320,
-        kind: "error",
-        actionId: "ask",
-      });
-    } finally {
-      dispatchPanel({ type: "setLoading", loading: null });
-      await invoke("set_actionbar_busy", { busy: false });
-    }
-  }
 
   // Stable dispatchers so DockIcon (React.memo) never re-renders from callback
   // identity churn. The actual handlers live in a ref so we can call the latest

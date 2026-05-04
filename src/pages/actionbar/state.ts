@@ -44,7 +44,7 @@ export type RevealPanelPayload = {
   actionId?: ActionId | null;
 };
 
-type PanelAction =
+export type PanelAction =
   | { type: "selectionReady" }
   | { type: "resetInlinePanels" }
   | { type: "revealPanel"; payload: RevealPanelPayload }

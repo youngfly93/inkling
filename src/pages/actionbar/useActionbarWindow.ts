@@ -12,6 +12,12 @@ import {
 } from "./constants";
 import type { ResultTone, SurfaceMode, WindowAnchor } from "./types";
 
+export type ResizeActionBarWindow = (
+  width: number,
+  height: number,
+  options?: { anchor?: WindowAnchor; screenPoint?: { x: number; y: number } | null }
+) => Promise<void>;
+
 interface UseActionbarWindowOptions {
   surfaceMode: SurfaceMode;
   hasResult: boolean;
@@ -38,7 +44,7 @@ export function useActionbarWindow({
   const contentRef = useRef<HTMLDivElement | null>(null);
   const lastMeasuredWindowSize = useRef<{ width: number; height: number } | null>(null);
 
-  const resizeActionBarWindow = useCallback(
+  const resizeActionBarWindow = useCallback<ResizeActionBarWindow>(
     async (
       width: number,
       height: number,
