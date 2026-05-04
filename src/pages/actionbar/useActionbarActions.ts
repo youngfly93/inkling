@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -53,9 +54,25 @@ export function useActionbarActions({
   clearDockHover,
   askInputRef,
 }: UseActionbarActionsOptions) {
+  const transientBusyHoldId = useRef(0);
   const text = selection.text;
   const app = selection.app;
   const url = selection.url;
+
+  function holdBusyDuringPanelHandoff() {
+    const holdId = transientBusyHoldId.current + 1;
+    transientBusyHoldId.current = holdId;
+    void setActionbarBusy(true);
+    window.setTimeout(() => {
+      if (transientBusyHoldId.current === holdId) {
+        void setActionbarBusy(false);
+      }
+    }, 250);
+  }
+
+  function cancelTransientBusyHold() {
+    transientBusyHoldId.current += 1;
+  }
 
   async function revealPanel(payload: RevealPanelPayload) {
     (document.activeElement as HTMLElement | null)?.blur?.();
@@ -68,6 +85,7 @@ export function useActionbarActions({
   }
 
   async function runAI(actionId: TransformActionId) {
+    cancelTransientBusyHold();
     dispatchPanel({ type: "beginTransform", loading: actionId });
     await setActionbarBusy(true);
     try {
@@ -146,6 +164,7 @@ export function useActionbarActions({
       return;
     }
 
+    cancelTransientBusyHold();
     dispatchPanel({ type: "setLoading", loading: "replace" });
     await setActionbarBusy(true);
     try {
@@ -174,6 +193,7 @@ export function useActionbarActions({
   }
 
   async function undoLastReplace() {
+    cancelTransientBusyHold();
     dispatchPanel({ type: "setLoading", loading: "undo" });
     await setActionbarBusy(true);
     try {
@@ -221,6 +241,7 @@ export function useActionbarActions({
   }
 
   async function openAskPanel(kind?: "selection" | "result") {
+    holdBusyDuringPanelHandoff();
     const win = getCurrentWindow();
     setSurfaceMode("dock");
     setOrbHovered(false);
@@ -252,6 +273,7 @@ export function useActionbarActions({
       return;
     }
 
+    cancelTransientBusyHold();
     dispatchPanel({ type: "beginTransform", loading: "ask" });
     await setActionbarBusy(true);
     try {

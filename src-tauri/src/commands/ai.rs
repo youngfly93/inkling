@@ -51,14 +51,16 @@ fn build_transform_prompt(text: &str, action: &str) -> Result<String, String> {
         "explain" => Ok(format!(
             "Explain the following selected text clearly and concisely. \
              Identify the main point, important context, and any terms that may be hard to understand. \
-             Use the same language as the selected text unless another language is clearly more useful. \
+             Use the same language as the selected text. If the selected text contains Chinese, answer in Simplified Chinese. \
+             Do not switch to English unless the selected text is primarily English. \
              Return only the explanation.\n\nSelected text:\n{}",
             text
         )),
         "summarize" => Ok(format!(
             "Summarize the following selected text into a concise, useful summary. \
              Keep the key points and avoid adding information that is not present in the text. \
-             Use the same language as the selected text. \
+             Use the same language as the selected text. If the selected text contains Chinese, answer in Simplified Chinese. \
+             Do not switch to English unless the selected text is primarily English. \
              Return only the summary.\n\nSelected text:\n{}",
             text
         )),
@@ -73,6 +75,7 @@ fn build_custom_prompt(text: &str, mode: &str, instruction: &str) -> Result<Stri
              Use the selected text as your primary source.\n\
              Answer the user's question directly and clearly.\n\
              If the question cannot be answered from the selected text alone, say that briefly and then give the best grounded answer you can.\n\
+             Answer in the same language as the user's question. If the question contains Chinese, answer in Simplified Chinese.\n\
              Return only the answer.\n\n\
              Selected text:\n{}\n\n\
              User question:\n{}",

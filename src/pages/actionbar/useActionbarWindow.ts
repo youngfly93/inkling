@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, monitorFromPoint, primaryMonitor } from "@tauri-apps/api/window";
 import {
   ORB_SHADOW_BLEED_X,
   ORB_SHADOW_BLEED_Y,
@@ -81,6 +81,22 @@ export function useActionbarWindow({
           const pointY = outerPos.y + SURFACE_PADDING_TOP * scaleFactor;
           nextX = pointX - (width * scaleFactor) / 2;
           nextY = pointY - (height * scaleFactor) / 2;
+        }
+
+        const nextWidth = width * scaleFactor;
+        const nextHeight = height * scaleFactor;
+        const monitor = await monitorFromPoint(nextX + nextWidth / 2, nextY + nextHeight / 2)
+          ?? await primaryMonitor();
+        const workArea = monitor?.workArea;
+
+        if (workArea) {
+          const margin = 8 * scaleFactor;
+          const minX = workArea.position.x + margin;
+          const minY = workArea.position.y + margin;
+          const maxX = Math.max(minX, workArea.position.x + workArea.size.width - nextWidth - margin);
+          const maxY = Math.max(minY, workArea.position.y + workArea.size.height - nextHeight - margin);
+          nextX = Math.min(Math.max(nextX, minX), maxX);
+          nextY = Math.min(Math.max(nextY, minY), maxY);
         }
 
         await win.setSize(new LogicalSize(width, height));

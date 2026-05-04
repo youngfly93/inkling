@@ -137,7 +137,14 @@ export function ResultPanel({
           </button>
         )}
         {!isErrorResult && (
-          <button type="button" onMouseDown={preventButtonFocus} onClick={onAsk} style={panelGhostButtonStyle()}>
+          <button
+            type="button"
+            onMouseDown={(event) => {
+              preventButtonFocus(event);
+              onAsk();
+            }}
+            style={panelGhostButtonStyle()}
+          >
             <AskIcon size={11} />
             Ask
           </button>
