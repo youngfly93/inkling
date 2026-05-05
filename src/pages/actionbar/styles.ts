@@ -234,3 +234,28 @@ export function panelIconButtonStyle(): CSSProperties {
     cursor: "pointer",
   };
 }
+
+export function dockActionLabelStyle(active: boolean): CSSProperties {
+  return {
+    height: 18,
+    minWidth: 140,
+    padding: "0 9px",
+    boxSizing: "border-box",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: ui.radius.pill,
+    border: `1px solid ${active ? ui.color.borderFaint : "transparent"}`,
+    background: active ? "rgba(255,255,255,0.88)" : "transparent",
+    color: active ? ui.color.inkReadable : "transparent",
+    boxShadow: active ? "0 3px 10px rgba(0,0,0,0.05)" : "none",
+    fontSize: 10,
+    fontWeight: ui.font.weight.semibold,
+    lineHeight: "18px",
+    whiteSpace: "nowrap",
+    pointerEvents: "none",
+    opacity: active ? 1 : 0,
+    transition:
+      "opacity 120ms ease, color 120ms ease, background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease",
+  };
+}

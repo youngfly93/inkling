@@ -39,6 +39,7 @@ export interface DockAction {
 export interface AskAction {
   id: "ask";
   label: string;
+  cn: string;
   icon: ReactNode;
 }
 

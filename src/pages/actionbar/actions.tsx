@@ -42,6 +42,7 @@ export const DOCK_ACTIONS: DockAction[] = [
 export const ASK_ACTION: AskAction = {
   id: "ask",
   label: "Ask AI",
+  cn: "提问",
   icon: <AskIcon />,
 };
 

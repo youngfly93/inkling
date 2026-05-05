@@ -27,6 +27,7 @@ import {
   wordTransitionLabel,
 } from "./actionbar/actions";
 import {
+  dockActionLabelStyle,
   preventButtonFocus,
   ui,
 } from "./actionbar/styles";
@@ -317,6 +318,11 @@ export default function ActionBar() {
       ? "answer"
       : wordTransitionLabel(text, result)
     : null;
+  const dockLabelAction =
+    hoveredAction === "ask"
+      ? ASK_ACTION
+      : DOCK_ACTIONS.find((action) => action.id === hoveredAction) ?? null;
+  const dockActionLabel = dockLabelAction ? `${dockLabelAction.label} · ${dockLabelAction.cn}` : " ";
 
   return (
     <div
@@ -388,65 +394,73 @@ export default function ActionBar() {
           }}
         />
       ) : !result && !askPanelOpen ? (
-        <motion.div
-          ref={dockRef}
-          className="dock-container"
-          onMouseMove={(event) => syncDockHoverFromClientPoint(event.clientX, event.clientY)}
-          onMouseEnter={(event) => syncDockHoverFromClientPoint(event.clientX, event.clientY)}
-          onMouseLeave={clearDockHover}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.12, ease: "easeOut" }}
-          style={{
-            display: "flex",
-            alignItems: "flex-end",
-            gap: 5,
-            padding: "7px",
-            borderRadius: 18,
-            background: ui.color.white,
-            border: `1px solid ${ui.color.border}`,
-            boxShadow: "0 6px 16px rgba(0,0,0,0.08)",
-            willChange: "transform",
-            transform: "translateZ(0)",
-            backfaceVisibility: "hidden",
-          }}
-        >
-          <DockIcon
-            id="ask"
-            label="Ask AI"
-            hovered={hoveredAction === "ask"}
-            isLoading={loading === "ask"}
-            onHoverChange={handleActionHover}
-            setButtonRef={setDockItemRef}
-            onClick={handleActionClick}
-          >
-            <AskIcon />
-          </DockIcon>
-          <div
-            aria-hidden="true"
+        <>
+          <motion.div
+            ref={dockRef}
+            className="dock-container"
+            onMouseMove={(event) => syncDockHoverFromClientPoint(event.clientX, event.clientY)}
+            onMouseEnter={(event) => syncDockHoverFromClientPoint(event.clientX, event.clientY)}
+            onMouseLeave={clearDockHover}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.12, ease: "easeOut" }}
             style={{
-              alignSelf: "center",
-              width: 1,
-              height: 18,
-              background: ui.color.border,
-              marginRight: 1,
+              display: "flex",
+              alignItems: "flex-end",
+              gap: 5,
+              padding: "7px",
+              borderRadius: 18,
+              background: ui.color.white,
+              border: `1px solid ${ui.color.border}`,
+              boxShadow: "0 6px 16px rgba(0,0,0,0.08)",
+              willChange: "transform",
+              transform: "translateZ(0)",
+              backfaceVisibility: "hidden",
             }}
-          />
-          {DOCK_ACTIONS.map((a) => (
+          >
             <DockIcon
-              key={a.id}
-              id={a.id}
-              label={a.label}
-              hovered={hoveredAction === a.id}
-              isLoading={loading === a.id}
+              id="ask"
+              label="Ask AI"
+              hovered={hoveredAction === "ask"}
+              isLoading={loading === "ask"}
               onHoverChange={handleActionHover}
               setButtonRef={setDockItemRef}
               onClick={handleActionClick}
             >
-              {a.icon}
+              <AskIcon />
             </DockIcon>
-          ))}
-        </motion.div>
+            <div
+              aria-hidden="true"
+              style={{
+                alignSelf: "center",
+                width: 1,
+                height: 18,
+                background: ui.color.border,
+                marginRight: 1,
+              }}
+            />
+            {DOCK_ACTIONS.map((a) => (
+              <DockIcon
+                key={a.id}
+                id={a.id}
+                label={a.label}
+                hovered={hoveredAction === a.id}
+                isLoading={loading === a.id}
+                onHoverChange={handleActionHover}
+                setButtonRef={setDockItemRef}
+                onClick={handleActionClick}
+              >
+                {a.icon}
+              </DockIcon>
+            ))}
+          </motion.div>
+          <div
+            aria-hidden={!dockLabelAction}
+            style={dockActionLabelStyle(!!dockLabelAction)}
+          >
+            {dockActionLabel}
+          </div>
+        </>
       ) : null}
 
       {askPanelOpen && (
