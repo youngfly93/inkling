@@ -17,6 +17,7 @@ import {
   deleteSentence,
   saveTransform,
   toggleFavorite,
+  type LibrarySortMode,
   type LibraryTransformFilter,
   type SavedSentence,
   type SentenceTransform,
@@ -34,6 +35,12 @@ const TRANSFORM_FILTERS: Array<{ id: LibraryTransformFilter; label: string }> = 
   { id: "summarize", label: "Summarize" },
 ];
 
+const SORT_OPTIONS: Array<{ id: LibrarySortMode; label: string }> = [
+  { id: "updated", label: "Updated" },
+  { id: "created", label: "Created" },
+  { id: "favorites", label: "Favorites first" },
+];
+
 interface LibraryAskTarget {
   transformId: string;
   sentenceId: string;
@@ -43,6 +50,8 @@ interface LibraryAskTarget {
 export default function LibraryPage() {
   const [search, setSearch] = useState("");
   const [transformFilter, setTransformFilter] = useState<LibraryTransformFilter>("all");
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [sortMode, setSortMode] = useState<LibrarySortMode>("updated");
   const [sentences, setSentences] = useState<SavedSentence[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [transforms, setTransforms] = useState<SentenceTransform[]>([]);
@@ -57,9 +66,11 @@ export default function LibraryPage() {
     const data = await fetchSentences({
       search: search || undefined,
       transformType: transformFilter,
+      favoritesOnly,
+      sortMode,
     });
     setSentences(data);
-  }, [search, transformFilter]);
+  }, [favoritesOnly, search, sortMode, transformFilter]);
 
   const reloadTransforms = useCallback(async (sentenceId: string | null) => {
     if (!sentenceId) {
@@ -175,6 +186,9 @@ export default function LibraryPage() {
     }
   }
 
+  const activeFilterLabel = TRANSFORM_FILTERS.find((item) => item.id === transformFilter)?.label ?? "All";
+  const activeSortLabel = SORT_OPTIONS.find((item) => item.id === sortMode)?.label ?? "Updated";
+
   function openFollowUp(sentenceId: string, transform: SentenceTransform) {
     if (askTarget?.transformId === transform.id) {
       setAskTarget(null);
@@ -263,13 +277,36 @@ export default function LibraryPage() {
             </button>
           ))}
         </div>
+        <div className="library-toolbar-row">
+          <button
+            type="button"
+            className={`library-filter ${favoritesOnly ? "is-active" : ""}`}
+            onClick={() => setFavoritesOnly((value) => !value)}
+          >
+            Favorites
+          </button>
+          <label className="library-sort-control">
+            <span>Sort</span>
+            <select value={sortMode} onChange={(event) => setSortMode(event.target.value as LibrarySortMode)}>
+              {SORT_OPTIONS.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
       {sentences.length === 0 ? (
         <div className="library-empty">
-          <span>{search || transformFilter !== "all" ? "No matches" : "No saved sentences yet"}</span>
+          <span>{search || transformFilter !== "all" || favoritesOnly ? "No matches" : "No saved sentences yet"}</span>
           <span style={{ fontSize: 12 }}>
-            {transformFilter === "all" ? "Library is empty." : "This action filter has no saved results."}
+            {favoritesOnly
+              ? "No favorite results in this view."
+              : transformFilter === "all"
+                ? "Library is empty."
+                : "This action filter has no saved results."}
           </span>
         </div>
       ) : (
@@ -422,7 +459,10 @@ export default function LibraryPage() {
       )}
 
       <div className="library-status">
-        <span>{sentences.length} sentences · {TRANSFORM_FILTERS.find((item) => item.id === transformFilter)?.label}</span>
+        <span>
+          {sentences.length} sentences · {activeFilterLabel} · {activeSortLabel}
+          {favoritesOnly ? " · Favorites" : ""}
+        </span>
         <span>{lastSyncLabel}</span>
       </div>
     </div>

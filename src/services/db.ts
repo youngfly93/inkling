@@ -41,9 +41,13 @@ export type LibraryTransformFilter =
   | "explain"
   | "summarize";
 
+export type LibrarySortMode = "updated" | "created" | "favorites";
+
 export interface FetchSentencesOptions {
   search?: string;
   transformType?: LibraryTransformFilter;
+  favoritesOnly?: boolean;
+  sortMode?: LibrarySortMode;
 }
 
 async function sha256Hex(text: string): Promise<string> {
@@ -119,6 +123,8 @@ export async function fetchSentences(options?: string | FetchSentencesOptions): 
   const d = await getDb();
   const search = typeof options === "string" ? options : options?.search;
   const transformType = typeof options === "string" ? "all" : options?.transformType ?? "all";
+  const favoritesOnly = typeof options === "string" ? false : options?.favoritesOnly ?? false;
+  const sortMode: LibrarySortMode = typeof options === "string" ? "updated" : options?.sortMode ?? "updated";
   const clauses: string[] = [];
   const params: unknown[] = [];
 
@@ -154,12 +160,23 @@ export async function fetchSentences(options?: string | FetchSentencesOptions): 
     );
   }
 
+  if (favoritesOnly) {
+    clauses.push("s.is_favorite = 1");
+  }
+
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const orderBy =
+    sortMode === "created"
+      ? "s.created_at DESC, s.updated_at DESC"
+      : sortMode === "favorites"
+        ? "s.is_favorite DESC, s.updated_at DESC, s.created_at DESC"
+        : "s.updated_at DESC, s.created_at DESC";
+
   return d.select<SavedSentence[]>(
     `SELECT DISTINCT s.*
      FROM saved_sentences s
      ${where}
-     ORDER BY s.updated_at DESC, s.created_at DESC`,
+     ORDER BY ${orderBy}`,
     params
   );
 }

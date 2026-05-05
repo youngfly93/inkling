@@ -471,6 +471,35 @@ input, textarea {
   color: var(--surface-plain);
 }
 
+.library-toolbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.library-sort-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.library-sort-control select {
+  height: 25px;
+  padding: 0 24px 0 9px;
+  border: 1px solid var(--ink-border-soft);
+  border-radius: 7px;
+  background: var(--surface-plain);
+  color: var(--fg);
+  font-size: 11px;
+  font-weight: 600;
+  outline: none;
+}
+
 .library-list {
   flex: 1;
   overflow-y: auto;
