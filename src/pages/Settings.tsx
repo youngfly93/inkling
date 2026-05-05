@@ -84,6 +84,13 @@ const QUICK_TIPS = [
   "If the source selection changes before Replace, Inkling blocks the write-back instead of guessing.",
 ];
 
+const SETTINGS_SECTIONS = [
+  { id: "runtime", label: "Runtime" },
+  { id: "ai-provider", label: "AI Provider" },
+  { id: "actions", label: "Actions" },
+  { id: "compatibility", label: "Compatibility" },
+] as const;
+
 interface RuntimeStatus {
   accessibilityTrusted: boolean;
   kimiApiKeyConfigured: boolean;
@@ -284,6 +291,10 @@ export default function SettingsPage() {
     );
   }
 
+  function scrollToSettingsSection(sectionId: string) {
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   const readinessItems = [
     {
       label: "Selection monitor",
@@ -355,10 +366,15 @@ export default function SettingsPage() {
       <div className="settings-layout">
         <aside className="settings-nav" aria-label="Settings sections">
           <div className="settings-nav-brand">Inkling</div>
-          <a href="#runtime">Runtime</a>
-          <a href="#ai-provider">AI Provider</a>
-          <a href="#actions">Actions</a>
-          <a href="#compatibility">Compatibility</a>
+          {SETTINGS_SECTIONS.map((section) => (
+            <button
+              key={section.id}
+              type="button"
+              onClick={() => scrollToSettingsSection(section.id)}
+            >
+              {section.label}
+            </button>
+          ))}
         </aside>
 
         <main className="settings-main">

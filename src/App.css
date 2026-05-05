@@ -163,17 +163,22 @@ input, textarea {
   text-transform: uppercase;
 }
 
-.settings-nav a {
+.settings-nav button {
   padding: 7px;
+  border: 0;
   border-radius: 7px;
+  background: transparent;
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
+  font: inherit;
+  text-align: left;
   text-decoration: none;
+  cursor: pointer;
 }
 
-.settings-nav a:hover,
-.settings-nav a:focus-visible {
+.settings-nav button:hover,
+.settings-nav button:focus-visible {
   background: rgba(21, 21, 21, 0.045);
   color: var(--fg);
 }
