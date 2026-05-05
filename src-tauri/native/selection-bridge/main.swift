@@ -90,6 +90,11 @@ func runHealth() {
 // MARK: - Monitor mode
 
 func debugLog(_ msg: String) {
+    guard let value = ProcessInfo.processInfo.environment["INKLING_DEBUG"]?.lowercased(),
+          ["1", "true", "yes", "on", "debug"].contains(value) else {
+        return
+    }
+
     FileHandle.standardError.write(Data("[bridge-debug] \(msg)\n".utf8))
 }
 

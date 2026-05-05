@@ -224,6 +224,48 @@ input, textarea {
   margin-bottom: 3px;
 }
 
+.settings-diagnostics {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--ink-border-faint);
+}
+
+.settings-diagnostics h3 {
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.settings-diagnostic-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-diagnostic-row {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.settings-diagnostic-label {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.settings-diagnostic-value {
+  min-width: 0;
+  color: var(--fg);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.settings-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
 .settings-pill {
   display: inline-flex;
   align-items: center;
@@ -453,6 +495,10 @@ input, textarea {
 }
 
 .library-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 6px 14px;
   border-top: 1px solid var(--ink-border-soft);
   font-size: 11px;

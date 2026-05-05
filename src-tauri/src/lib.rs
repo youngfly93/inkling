@@ -1,4 +1,5 @@
 mod commands;
+mod logging;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -34,22 +35,26 @@ pub fn run() {
 
             match event {
                 WindowEvent::CloseRequested { api, .. } => {
-                    eprintln!("Actionbar close requested: {}", window.label());
+                    logging::debug(format!("Actionbar close requested: {}", window.label()));
                     api.prevent_close();
                 }
                 WindowEvent::Destroyed => {
-                    eprintln!("Actionbar destroyed: {}", window.label());
+                    logging::debug(format!("Actionbar destroyed: {}", window.label()));
                 }
                 WindowEvent::Focused(focused) => {
-                    eprintln!("Actionbar focus changed: {} -> {}", window.label(), focused);
+                    logging::debug(format!(
+                        "Actionbar focus changed: {} -> {}",
+                        window.label(),
+                        focused
+                    ));
                 }
                 WindowEvent::Moved(position) => {
-                    eprintln!(
+                    logging::debug(format!(
                         "Actionbar moved event: {} -> ({}, {})",
                         window.label(),
                         position.x,
                         position.y
-                    );
+                    ));
                 }
                 _ => {}
             }
@@ -128,7 +133,7 @@ pub fn run() {
 
     app.run(|_, event| {
         if let RunEvent::ExitRequested { api, code, .. } = event {
-            eprintln!("App exit requested: {:?}", code);
+            logging::debug(format!("App exit requested: {:?}", code));
             if !ALLOW_EXIT.load(Ordering::Relaxed) {
                 api.prevent_exit();
             }

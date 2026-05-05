@@ -4,9 +4,12 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command as StdCommand;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager};
+
+use crate::logging;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SelectionSnapshot {
@@ -25,6 +28,17 @@ pub struct SelectionSnapshot {
     pub anchor_x: Option<f64>,
     #[serde(rename = "anchorY")]
     pub anchor_y: Option<f64>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectionDiagnostic {
+    pub app: String,
+    pub app_name: String,
+    pub text_length: usize,
+    pub editable: bool,
+    pub method: String,
+    pub captured_at_ms: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -61,6 +75,57 @@ struct ReplacementHistory {
 }
 
 static LAST_REPLACEMENT: Mutex<Option<ReplacementHistory>> = Mutex::new(None);
+static MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
+static MONITOR_LAST_ERROR: Mutex<Option<String>> = Mutex::new(None);
+static LAST_SELECTION_DIAGNOSTIC: Mutex<Option<SelectionDiagnostic>> = Mutex::new(None);
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis().min(u64::MAX as u128) as u64)
+        .unwrap_or(0)
+}
+
+pub fn selection_diagnostic_from_snapshot(snapshot: &SelectionSnapshot) -> SelectionDiagnostic {
+    SelectionDiagnostic {
+        app: snapshot.app.clone(),
+        app_name: snapshot.app_name.clone(),
+        text_length: snapshot.text.chars().count(),
+        editable: snapshot.editable,
+        method: snapshot.method.clone(),
+        captured_at_ms: now_ms(),
+    }
+}
+
+fn record_selection_diagnostic(snapshot: &SelectionSnapshot) {
+    if let Ok(mut last) = LAST_SELECTION_DIAGNOSTIC.lock() {
+        *last = Some(selection_diagnostic_from_snapshot(snapshot));
+    }
+}
+
+pub fn is_monitor_running() -> bool {
+    MONITOR_RUNNING.load(Ordering::Relaxed)
+}
+
+pub fn monitor_last_error() -> Option<String> {
+    MONITOR_LAST_ERROR
+        .lock()
+        .ok()
+        .and_then(|error| error.clone())
+}
+
+pub fn last_selection_diagnostic() -> Option<SelectionDiagnostic> {
+    LAST_SELECTION_DIAGNOSTIC
+        .lock()
+        .ok()
+        .and_then(|last| last.clone())
+}
+
+fn set_monitor_error(message: Option<String>) {
+    if let Ok(mut error) = MONITOR_LAST_ERROR.lock() {
+        *error = message;
+    }
+}
 
 #[tauri::command]
 pub async fn get_selection(app: tauri::AppHandle) -> Result<SelectionSnapshot, String> {
@@ -170,10 +235,10 @@ pub async fn undo_last_replace(app: tauri::AppHandle) -> Result<(), String> {
         .clone()
         .ok_or_else(|| "No replace history to undo".to_string())?;
 
-    eprintln!(
+    logging::debug(format!(
         "Undoing last replacement for {} using {} at {}",
         history.target_app, history.method, history.timestamp_ms
-    );
+    ));
 
     let target_app = history.target_app.clone();
     let original_text = history.original_text.clone();
@@ -258,7 +323,9 @@ pub fn start_monitor(app: &tauri::AppHandle) {
     let handle = app.clone();
     let bridge_path = resolve_bridge_path(app);
 
-    eprintln!("Starting monitor from: {:?}", bridge_path);
+    logging::debug(format!("Starting monitor from: {:?}", bridge_path));
+    MONITOR_RUNNING.store(false, Ordering::Relaxed);
+    set_monitor_error(None);
 
     std::thread::spawn(move || {
         let child = StdCommand::new(&bridge_path)
@@ -268,9 +335,15 @@ pub fn start_monitor(app: &tauri::AppHandle) {
             .spawn();
 
         let mut child = match child {
-            Ok(c) => c,
+            Ok(c) => {
+                MONITOR_RUNNING.store(true, Ordering::Relaxed);
+                set_monitor_error(None);
+                c
+            }
             Err(e) => {
-                eprintln!("Failed to start monitor: {}", e);
+                logging::error(format!("Failed to start monitor: {}", e));
+                MONITOR_RUNNING.store(false, Ordering::Relaxed);
+                set_monitor_error(Some(e.to_string()));
                 return;
             }
         };
@@ -292,16 +365,16 @@ pub fn start_monitor(app: &tauri::AppHandle) {
                 Ok(snapshot) => {
                     if snapshot.method == "clear" || snapshot.text.trim().is_empty() {
                         if super::windowing::is_clear_click_inside_actionbar(&handle, &snapshot) {
-                            eprintln!("Monitor: ignoring clear click inside actionbar");
+                            logging::debug("Monitor: ignoring clear click inside actionbar");
                             continue;
                         }
 
                         if super::windowing::is_actionbar_busy(&handle) {
-                            eprintln!("Monitor: skipping clear, actionbar is busy");
+                            logging::debug("Monitor: skipping clear, actionbar is busy");
                             continue;
                         }
 
-                        eprintln!("Monitor: clearing action bar");
+                        logging::debug("Monitor: clearing action bar");
                         let h = handle.clone();
                         let main_handle = h.clone();
                         let _ = h.run_on_main_thread(move || {
@@ -310,11 +383,12 @@ pub fn start_monitor(app: &tauri::AppHandle) {
                         continue;
                     }
 
-                    eprintln!(
+                    logging::debug(format!(
                         "Monitor: selection {} chars from {}",
                         snapshot.text.len(),
                         snapshot.app
-                    );
+                    ));
+                    record_selection_diagnostic(&snapshot);
                     let _ = handle.emit("selection-captured", &snapshot);
 
                     // Open action bar on main thread
@@ -328,11 +402,14 @@ pub fn start_monitor(app: &tauri::AppHandle) {
                     });
                 }
                 Err(e) => {
-                    eprintln!("Monitor parse error: {} (line: {})", e, line);
+                    logging::error(format!("Monitor parse error: {} (line: {})", e, line));
+                    set_monitor_error(Some(format!("Monitor parse error: {}", e)));
                 }
             }
         }
 
-        eprintln!("Monitor process ended");
+        MONITOR_RUNNING.store(false, Ordering::Relaxed);
+        set_monitor_error(Some("Monitor process ended".to_string()));
+        logging::error("Monitor process ended");
     });
 }

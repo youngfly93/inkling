@@ -7,6 +7,7 @@ use tauri::{
 };
 
 use super::selection::SelectionSnapshot;
+use crate::logging;
 
 #[cfg(target_os = "macos")]
 use cocoa::base::{id, NO, YES};
@@ -29,9 +30,15 @@ pub fn is_actionbar_busy(_app: &AppHandle) -> bool {
     ACTIONBAR_BUSY.load(Ordering::Relaxed)
 }
 
+pub fn is_actionbar_visible(app: &AppHandle) -> bool {
+    app.get_webview_window(ACTIONBAR_LABEL)
+        .and_then(|win| win.is_visible().ok())
+        .unwrap_or(false)
+}
+
 pub fn close_action_bars(app: &AppHandle) {
     if let Some(win) = app.get_webview_window(ACTIONBAR_LABEL) {
-        eprintln!("Hiding actionbar");
+        logging::debug("Hiding actionbar");
         let _ = win.hide();
     }
 
@@ -207,12 +214,12 @@ pub fn open_action_bar(app: &AppHandle, snapshot: &SelectionSnapshot) {
         let _ = win.set_focusable(false);
         let _ = win.show();
         let _ = app.emit("selection-ready", snapshot);
-        eprintln!("Action bar reused at logical ({}, {})", x, y);
+        logging::debug(format!("Action bar reused at logical ({}, {})", x, y));
         return;
     }
 
     // First time: create the window
-    eprintln!("Creating action bar at ({}, {})", x, y);
+    logging::debug(format!("Creating action bar at ({}, {})", x, y));
     let win_result =
         WebviewWindowBuilder::new(app, ACTIONBAR_LABEL, WebviewUrl::App("/#/actionbar".into()))
             .title("Inkling")
@@ -236,7 +243,7 @@ pub fn open_action_bar(app: &AppHandle, snapshot: &SelectionSnapshot) {
             let _ = win.set_focusable(false);
             let _ = win.set_position(LogicalPosition::new(x, y));
             let _ = win.show();
-            eprintln!("Action bar created at logical ({}, {})", x, y);
+            logging::debug(format!("Action bar created at logical ({}, {})", x, y));
 
             // Emit after window loads
             let handle = app.clone();
@@ -246,14 +253,14 @@ pub fn open_action_bar(app: &AppHandle, snapshot: &SelectionSnapshot) {
                 let _ = handle.emit("selection-ready", &snap);
             });
         }
-        Err(e) => eprintln!("Action bar FAILED: {}", e),
+        Err(e) => logging::error(format!("Action bar FAILED: {}", e)),
     }
 }
 
 #[tauri::command]
 pub fn set_actionbar_busy(busy: bool) {
     ACTIONBAR_BUSY.store(busy, Ordering::Relaxed);
-    eprintln!("Actionbar busy: {}", busy);
+    logging::debug(format!("Actionbar busy: {}", busy));
 }
 
 #[tauri::command]

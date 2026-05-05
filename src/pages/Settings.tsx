@@ -38,6 +38,23 @@ interface RuntimeStatus {
   apiHost: string;
   model: string;
   sidecarAvailable: boolean;
+  sidecarExecutable: boolean;
+  bridgePath: string;
+  selectionMonitorRunning: boolean;
+  monitorLastError: string | null;
+  actionbarVisible: boolean;
+  actionbarBusy: boolean;
+  currentSelection: SelectionDiagnostic | null;
+  lastSelection: SelectionDiagnostic | null;
+}
+
+interface SelectionDiagnostic {
+  app: string;
+  appName: string;
+  textLength: number;
+  editable: boolean;
+  method: string;
+  capturedAtMs: number;
 }
 
 export default function SettingsPage() {
@@ -55,9 +72,15 @@ export default function SettingsPage() {
     const handleFocus = () => {
       void refreshStatus();
     };
+    const interval = window.setInterval(() => {
+      void refreshStatus();
+    }, 4000);
 
     window.addEventListener("focus", handleFocus);
-    return () => window.removeEventListener("focus", handleFocus);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+    };
   }, []);
 
   async function refreshAll() {
@@ -104,7 +127,38 @@ export default function SettingsPage() {
     }
   }
 
+  function formatSelectionSummary(selection: SelectionDiagnostic | null | undefined): string {
+    if (!selection) {
+      return "No live selection";
+    }
+
+    const source = selection.appName || selection.app || "Unknown app";
+    const editability = selection.editable ? "editable" : "read-only";
+    return `${selection.textLength} chars from ${source} · ${editability} · ${selection.method}`;
+  }
+
+  function formatStatusTime(timestampMs: number): string {
+    if (!timestampMs) {
+      return "unknown time";
+    }
+
+    return new Date(timestampMs).toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  }
+
   const readinessItems = [
+    {
+      label: "Selection monitor",
+      ok: !!status?.selectionMonitorRunning,
+      detail: status?.selectionMonitorRunning
+        ? "Running. Inkling is listening for new macOS selections."
+        : status?.monitorLastError
+          ? `Stopped. Last error: ${status.monitorLastError}`
+          : "Stopped. Restart Inkling if selection capture does not recover.",
+    },
     {
       label: "Accessibility permission",
       ok: !!status?.accessibilityTrusted,
@@ -121,14 +175,45 @@ export default function SettingsPage() {
     },
     {
       label: "Native selection bridge",
-      ok: !!status?.sidecarAvailable,
-      detail: status?.sidecarAvailable
+      ok: !!status?.sidecarAvailable && !!status?.sidecarExecutable,
+      detail: status?.sidecarAvailable && status?.sidecarExecutable
         ? "Ready. macOS selection monitoring and replace logic are available."
-        : "Missing. The native selection bridge binary is unavailable.",
+        : status?.sidecarAvailable
+          ? "Found, but not executable. Fix file permissions on the native bridge binary."
+          : "Missing. The native selection bridge binary is unavailable.",
     },
   ];
 
   const readyCount = readinessItems.filter((item) => item.ok).length;
+  const diagnostics = [
+    {
+      label: "Action bar",
+      value: status?.actionbarVisible
+        ? status.actionbarBusy
+          ? "Visible · busy"
+          : "Visible · idle"
+        : "Hidden",
+    },
+    {
+      label: "Current selection",
+      value: formatSelectionSummary(status?.currentSelection),
+    },
+    {
+      label: "Last selection",
+      value: status?.lastSelection
+        ? `${formatSelectionSummary(status.lastSelection)} · ${formatStatusTime(status.lastSelection.capturedAtMs)}`
+        : "No selection captured yet",
+    },
+    {
+      label: "Bridge path",
+      value: status?.bridgePath || "Unknown",
+      mono: true,
+    },
+    {
+      label: "Monitor note",
+      value: status?.monitorLastError || "No monitor errors reported",
+    },
+  ];
 
   return (
     <div className="settings-shell">
@@ -168,6 +253,20 @@ export default function SettingsPage() {
               </div>
             </div>
           ))}
+        </div>
+
+        <div className="settings-diagnostics">
+          <h3>Runtime diagnostics</h3>
+          <div className="settings-diagnostic-list">
+            {diagnostics.map((item) => (
+              <div key={item.label} className="settings-diagnostic-row">
+                <span className="settings-diagnostic-label">{item.label}</span>
+                <span className={item.mono ? "settings-diagnostic-value settings-mono" : "settings-diagnostic-value"}>
+                  {item.value}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
 
         {statusError && <div className="settings-inline-error">Runtime status failed: {statusError}</div>}

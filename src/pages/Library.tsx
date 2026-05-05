@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { Star, Trash2, Copy, Check, ChevronDown, ChevronRight } from "lucide-react";
 import {
   fetchSentences,
@@ -8,6 +9,7 @@ import {
   type SavedSentence,
   type SentenceTransform,
 } from "../services/db";
+import { LIBRARY_UPDATED_EVENT, type LibraryUpdatedPayload } from "../services/libraryEvents";
 
 export default function LibraryPage() {
   const [search, setSearch] = useState("");
@@ -15,23 +17,57 @@ export default function LibraryPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [transforms, setTransforms] = useState<SentenceTransform[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [lastSyncLabel, setLastSyncLabel] = useState("Live updates");
 
   const load = useCallback(async () => {
     const data = await fetchSentences(search || undefined);
     setSentences(data);
   }, [search]);
 
+  const reloadTransforms = useCallback(async (sentenceId: string | null) => {
+    if (!sentenceId) {
+      setTransforms([]);
+      return;
+    }
+
+    const data = await fetchTransforms(sentenceId);
+    setTransforms(data);
+  }, []);
+
   useEffect(() => {
     load();
   }, [load]);
 
-  // Reload every 2s when window is focused (picks up saves from ActionBar)
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (document.hasFocus()) load();
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [load]);
+    let active = true;
+
+    const unlistenPromise = listen<LibraryUpdatedPayload>(LIBRARY_UPDATED_EVENT, (event) => {
+      if (!active) return;
+
+      void load();
+      if (event.payload.sentenceId === expandedId) {
+        void reloadTransforms(expandedId);
+      }
+      setLastSyncLabel("Updated just now");
+    });
+
+    return () => {
+      active = false;
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [expandedId, load, reloadTransforms]);
+
+  useEffect(() => {
+    const handleFocus = () => {
+      void load();
+      if (expandedId) {
+        void reloadTransforms(expandedId);
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [expandedId, load, reloadTransforms]);
 
   async function handleExpand(id: string) {
     if (expandedId === id) {
@@ -40,8 +76,7 @@ export default function LibraryPage() {
       return;
     }
     setExpandedId(id);
-    const t = await fetchTransforms(id);
-    setTransforms(t);
+    await reloadTransforms(id);
   }
 
   async function handleDelete(id: string) {
@@ -240,7 +275,10 @@ export default function LibraryPage() {
         </div>
       )}
 
-      <div className="library-status">{sentences.length} sentences</div>
+      <div className="library-status">
+        <span>{sentences.length} sentences</span>
+        <span>{lastSyncLabel}</span>
+      </div>
     </div>
   );
 }
