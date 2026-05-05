@@ -314,7 +314,7 @@ export default function LibraryPage() {
           {sentences.map((s) => (
             <div key={s.id}>
               <div
-                className="sentence-row"
+                className={`sentence-row ${expandedId === s.id ? "is-expanded" : ""}`}
                 onClick={() => handleExpand(s.id)}
               >
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>

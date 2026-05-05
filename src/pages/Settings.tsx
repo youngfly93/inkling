@@ -1,7 +1,59 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import type { PolishStyle, TranslateMode } from "./actionbar/aiClient";
 
 const MODELS = ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"];
+
+const TRANSLATE_MODES: Array<{ id: TranslateMode; label: string; detail: string }> = [
+  {
+    id: "auto",
+    label: "Auto",
+    detail: "Chinese-led text goes to English; English-led text goes to Chinese.",
+  },
+  {
+    id: "to_chinese",
+    label: "To Chinese",
+    detail: "Always return natural Simplified Chinese.",
+  },
+  {
+    id: "to_english",
+    label: "To English",
+    detail: "Always return natural English.",
+  },
+];
+
+const POLISH_STYLES: Array<{ id: PolishStyle; label: string; detail: string }> = [
+  {
+    id: "balanced",
+    label: "Balanced",
+    detail: "Natural, clear, and faithful to the original tone.",
+  },
+  {
+    id: "concise",
+    label: "Concise",
+    detail: "Tighter wording with less repetition.",
+  },
+  {
+    id: "formal",
+    label: "Formal",
+    detail: "More composed and public-facing.",
+  },
+  {
+    id: "friendly",
+    label: "Friendly",
+    detail: "Warmer and more approachable.",
+  },
+  {
+    id: "professional",
+    label: "Professional",
+    detail: "Sharper, confident, and businesslike.",
+  },
+  {
+    id: "custom",
+    label: "Custom",
+    detail: "Use your own polish instruction.",
+  },
+];
 
 const SUPPORT_MATRIX = [
   {
@@ -61,6 +113,9 @@ export default function SettingsPage() {
   const [apiKey, setApiKey] = useState("");
   const [apiHost, setApiHost] = useState("api.moonshot.cn");
   const [model, setModel] = useState("moonshot-v1-8k");
+  const [translateMode, setTranslateMode] = useState<TranslateMode>("auto");
+  const [polishStyle, setPolishStyle] = useState<PolishStyle>("balanced");
+  const [polishCustomInstruction, setPolishCustomInstruction] = useState("");
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<RuntimeStatus | null>(null);
@@ -104,9 +159,23 @@ export default function SettingsPage() {
       const key = await invoke<string | null>("get_setting", { key: "kimi_api_key" });
       const host = await invoke<string | null>("get_setting", { key: "kimi_api_host" });
       const m = await invoke<string | null>("get_setting", { key: "kimi_model" });
+      const mode = await invoke<string | null>("get_setting", { key: "translate_mode" });
+      const style = await invoke<string | null>("get_setting", { key: "polish_style" });
+      const customInstruction = await invoke<string | null>("get_setting", { key: "polish_custom_instruction" });
       setApiKey(key || "");
       setApiHost(host || "api.moonshot.cn");
       setModel(m || "moonshot-v1-8k");
+      setTranslateMode(mode === "to_chinese" || mode === "to_english" ? mode : "auto");
+      setPolishStyle(
+        style === "concise" ||
+          style === "formal" ||
+          style === "friendly" ||
+          style === "professional" ||
+          style === "custom"
+          ? style
+          : "balanced"
+      );
+      setPolishCustomInstruction(customInstruction || "");
     } catch (e) {
       console.error("Failed to load settings:", e);
     }
@@ -118,6 +187,12 @@ export default function SettingsPage() {
       await invoke("set_setting", { key: "kimi_api_key", value: apiKey.trim() });
       await invoke("set_setting", { key: "kimi_api_host", value: apiHost.trim() || "api.moonshot.cn" });
       await invoke("set_setting", { key: "kimi_model", value: model });
+      await invoke("set_setting", { key: "translate_mode", value: translateMode });
+      await invoke("set_setting", { key: "polish_style", value: polishStyle });
+      await invoke("set_setting", {
+        key: "polish_custom_instruction",
+        value: polishCustomInstruction.trim(),
+      });
       await refreshStatus();
       setSaved(true);
       setTimeout(() => setSaved(false), 1500);
@@ -393,6 +468,55 @@ export default function SettingsPage() {
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="form-group">
+          <label>Translate target</label>
+          <div className="settings-choice-row" role="group" aria-label="Translate target">
+            {TRANSLATE_MODES.map((mode) => (
+              <button
+                key={mode.id}
+                type="button"
+                className={`settings-choice ${translateMode === mode.id ? "is-active" : ""}`}
+                aria-pressed={translateMode === mode.id}
+                onClick={() => setTranslateMode(mode.id)}
+              >
+                <span>{mode.label}</span>
+                <small>{mode.detail}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label>Polish style</label>
+          <div className="settings-choice-row settings-choice-row-polish" role="group" aria-label="Polish style">
+            {POLISH_STYLES.map((style) => (
+              <button
+                key={style.id}
+                type="button"
+                className={`settings-choice ${polishStyle === style.id ? "is-active" : ""}`}
+                aria-pressed={polishStyle === style.id}
+                onClick={() => setPolishStyle(style.id)}
+              >
+                <span>{style.label}</span>
+                <small>{style.detail}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className={`form-group settings-custom-polish ${polishStyle === "custom" ? "is-active" : ""}`}>
+          <label>Custom polish instruction</label>
+          <textarea
+            value={polishCustomInstruction}
+            onChange={(e) => setPolishCustomInstruction(e.target.value)}
+            placeholder="Example: Keep my tone casual, but make the wording clearer and more confident."
+            rows={3}
+          />
+          <div className="settings-field-note">
+            Used when Polish style is Custom. If Custom is selected but this is empty, Inkling falls back to Balanced.
+          </div>
         </div>
 
         <div className="settings-actions-row">
