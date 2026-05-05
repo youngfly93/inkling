@@ -1,28 +1,65 @@
 import { useState, useEffect, useCallback } from "react";
-import { listen } from "@tauri-apps/api/event";
-import { Star, Trash2, Copy, Check, ChevronDown, ChevronRight } from "lucide-react";
+import { emit, listen } from "@tauri-apps/api/event";
+import {
+  Star,
+  Trash2,
+  Copy,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  MessageCircle,
+  Send,
+  Loader2,
+} from "lucide-react";
 import {
   fetchSentences,
   fetchTransforms,
   deleteSentence,
+  saveTransform,
   toggleFavorite,
+  type LibraryTransformFilter,
   type SavedSentence,
   type SentenceTransform,
 } from "../services/db";
 import { LIBRARY_UPDATED_EVENT, type LibraryUpdatedPayload } from "../services/libraryEvents";
+import { askAboutSelectedText, loadAIConfig } from "./actionbar/aiClient";
+
+const TRANSFORM_FILTERS: Array<{ id: LibraryTransformFilter; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "ask", label: "Ask" },
+  { id: "translate", label: "Translate" },
+  { id: "polish", label: "Polish" },
+  { id: "grammar", label: "Grammar" },
+  { id: "explain", label: "Explain" },
+  { id: "summarize", label: "Summarize" },
+];
+
+interface LibraryAskTarget {
+  transformId: string;
+  sentenceId: string;
+  contextText: string;
+}
 
 export default function LibraryPage() {
   const [search, setSearch] = useState("");
+  const [transformFilter, setTransformFilter] = useState<LibraryTransformFilter>("all");
   const [sentences, setSentences] = useState<SavedSentence[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [transforms, setTransforms] = useState<SentenceTransform[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [lastSyncLabel, setLastSyncLabel] = useState("Live updates");
+  const [askTarget, setAskTarget] = useState<LibraryAskTarget | null>(null);
+  const [askQuestion, setAskQuestion] = useState("");
+  const [askLoadingId, setAskLoadingId] = useState<string | null>(null);
+  const [askError, setAskError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const data = await fetchSentences(search || undefined);
+    const data = await fetchSentences({
+      search: search || undefined,
+      transformType: transformFilter,
+    });
     setSentences(data);
-  }, [search]);
+  }, [search, transformFilter]);
 
   const reloadTransforms = useCallback(async (sentenceId: string | null) => {
     if (!sentenceId) {
@@ -73,21 +110,24 @@ export default function LibraryPage() {
     if (expandedId === id) {
       setExpandedId(null);
       setTransforms([]);
+      setAskTarget(null);
       return;
     }
     setExpandedId(id);
+    setAskTarget(null);
     await reloadTransforms(id);
   }
 
   async function handleDelete(id: string) {
     await deleteSentence(id);
     setExpandedId(null);
-    load();
+    setAskTarget(null);
+    void load();
   }
 
   async function handleFavorite(id: string, current: number) {
     await toggleFavorite(id, current);
-    load();
+    void load();
   }
 
   function handleCopy(text: string, id: string) {
@@ -99,6 +139,11 @@ export default function LibraryPage() {
   function formatDate(iso: string): string {
     const d = new Date(iso);
     return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  }
+
+  function formatTime(iso: string): string {
+    const d = new Date(iso);
+    return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   }
 
   function appLabel(bundleId: string | null): string {
@@ -130,24 +175,101 @@ export default function LibraryPage() {
     }
   }
 
+  function openFollowUp(sentenceId: string, transform: SentenceTransform) {
+    if (askTarget?.transformId === transform.id) {
+      setAskTarget(null);
+      setAskQuestion("");
+      setAskError(null);
+      return;
+    }
+
+    setAskTarget({
+      transformId: transform.id,
+      sentenceId,
+      contextText: transform.output_text,
+    });
+    setAskQuestion("");
+    setAskError(null);
+  }
+
+  async function submitFollowUp() {
+    const target = askTarget;
+    const question = askQuestion.trim();
+    if (!target || !question || askLoadingId) {
+      return;
+    }
+
+    setAskLoadingId(target.transformId);
+    setAskError(null);
+    try {
+      const config = await loadAIConfig();
+      if (!config.apiKey) {
+        throw new Error("Kimi API key is missing. Open Settings and add a key first.");
+      }
+
+      const answer = await askAboutSelectedText({
+        text: target.contextText,
+        question,
+        config,
+      });
+
+      await saveTransform(
+        target.sentenceId,
+        "ask",
+        `${target.contextText}\n\nQ: ${question}`,
+        answer,
+        config.model
+      );
+
+      const payload: LibraryUpdatedPayload = {
+        sentenceId: target.sentenceId,
+        transformType: "ask",
+        savedAt: new Date().toISOString(),
+      };
+      await emit(LIBRARY_UPDATED_EVENT, payload).catch(() => {});
+      await Promise.all([load(), reloadTransforms(target.sentenceId)]);
+      setLastSyncLabel("Updated just now");
+      setAskTarget(null);
+      setAskQuestion("");
+    } catch (e) {
+      console.error("Library follow-up ask failed:", e);
+      setAskError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAskLoadingId(null);
+    }
+  }
+
   return (
     <div className="library-container">
       <div className="library-search">
-        <input
-          type="text"
-          placeholder="Search sentences..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          autoFocus
-        />
+        <div className="library-search-row">
+          <input
+            type="text"
+            placeholder="Search original, results, source, model..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            autoFocus
+          />
+        </div>
+        <div className="library-filter-row" aria-label="Filter by action">
+          {TRANSFORM_FILTERS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`library-filter ${transformFilter === item.id ? "is-active" : ""}`}
+              onClick={() => setTransformFilter(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {sentences.length === 0 ? (
         <div className="library-empty">
-          <span style={{ fontSize: 36, opacity: 0.5 }}>📚</span>
-          <span>{search ? "No matches" : "No saved sentences yet"}</span>
+          <span>{search || transformFilter !== "all" ? "No matches" : "No saved sentences yet"}</span>
           <span style={{ fontSize: 12 }}>
-            {"Select text anywhere -> run an Inkling action"}
+            {transformFilter === "all" ? "Library is empty." : "This action filter has no saved results."}
           </span>
         </div>
       ) : (
@@ -217,46 +339,37 @@ export default function LibraryPage() {
                 </div>
               </div>
 
-              {/* Expanded: show transforms */}
               {expandedId === s.id && transforms.length > 0 && (
-                <div
-                  style={{
-                    padding: "8px 14px 12px 34px",
-                    borderBottom: "1px solid var(--border)",
-                    background: "var(--surface)",
-                  }}
-                >
+                <div className="library-transform-list">
                   {transforms.map((t) => (
-                    <div
-                      key={t.id}
-                      style={{
-                        marginBottom: 8,
-                        padding: "8px 10px",
-                        borderRadius: 8,
-                        border: "1px solid var(--border)",
-                        fontSize: 12,
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          marginBottom: 4,
-                          color: "var(--muted)",
-                          fontSize: 11,
-                        }}
-                      >
-                        <span style={{ fontWeight: 600 }}>
-                          {formatTransformType(t.transform_type)}
-                        </span>
-                        <span>{formatDate(t.created_at)}</span>
+                    <div key={t.id} className="library-transform-card">
+                      <div className="library-transform-head">
+                        <div>
+                          <span className="library-transform-type">
+                            {formatTransformType(t.transform_type)}
+                          </span>
+                          {t.model_name && <span className="library-transform-model">{t.model_name}</span>}
+                        </div>
+                        <span>{formatDate(t.created_at)} · {formatTime(t.created_at)}</span>
                       </div>
-                      <div style={{ lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+                      <div className="library-transform-output">
                         {t.output_text}
                       </div>
-                      <div style={{ textAlign: "right", marginTop: 4 }}>
+                      <div className="library-transform-actions">
+                        <button
+                          type="button"
+                          className="library-action-btn"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openFollowUp(s.id, t);
+                          }}
+                        >
+                          <MessageCircle size={12} />
+                          Ask
+                        </button>
                         <button
                           className="btn-icon"
+                          title="Copy"
                           onClick={() => handleCopy(t.output_text, t.id)}
                         >
                           {copiedId === t.id ? (
@@ -266,6 +379,39 @@ export default function LibraryPage() {
                           )}
                         </button>
                       </div>
+                      {askTarget?.transformId === t.id && (
+                        <div className="library-ask-panel">
+                          <textarea
+                            value={askQuestion}
+                            onChange={(event) => setAskQuestion(event.target.value)}
+                            placeholder="Ask about this saved result..."
+                            rows={3}
+                          />
+                          {askError && <div className="library-ask-error">{askError}</div>}
+                          <div className="library-ask-actions">
+                            <button
+                              type="button"
+                              className="library-action-btn"
+                              onClick={() => {
+                                setAskTarget(null);
+                                setAskQuestion("");
+                                setAskError(null);
+                              }}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              className="library-ask-submit"
+                              disabled={!askQuestion.trim() || askLoadingId === t.id}
+                              onClick={() => void submitFollowUp()}
+                            >
+                              {askLoadingId === t.id ? <Loader2 size={12} className="spin" /> : <Send size={12} />}
+                              Ask
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -276,7 +422,7 @@ export default function LibraryPage() {
       )}
 
       <div className="library-status">
-        <span>{sentences.length} sentences</span>
+        <span>{sentences.length} sentences · {TRANSFORM_FILTERS.find((item) => item.id === transformFilter)?.label}</span>
         <span>{lastSyncLabel}</span>
       </div>
     </div>

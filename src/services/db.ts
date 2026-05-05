@@ -32,6 +32,20 @@ export interface SentenceTransform {
   created_at: string;
 }
 
+export type LibraryTransformFilter =
+  | "all"
+  | "ask"
+  | "translate"
+  | "polish"
+  | "grammar"
+  | "explain"
+  | "summarize";
+
+export interface FetchSentencesOptions {
+  search?: string;
+  transformType?: LibraryTransformFilter;
+}
+
 async function sha256Hex(text: string): Promise<string> {
   const data = new TextEncoder().encode(text);
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
@@ -88,25 +102,65 @@ export async function saveTransform(
   modelName?: string
 ): Promise<void> {
   const d = await getDb();
+  const timestamp = nowISO();
   await d.execute(
     `INSERT INTO sentence_transforms (id, sentence_id, transform_type, input_text, output_text, model_name, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [uuid(), sentenceId, type, inputText, outputText, modelName || null, nowISO()]
+    [uuid(), sentenceId, type, inputText, outputText, modelName || null, timestamp]
+  );
+  await d.execute(
+    "UPDATE saved_sentences SET updated_at = $1 WHERE id = $2",
+    [timestamp, sentenceId]
   );
 }
 
 // Fetch all sentences
-export async function fetchSentences(search?: string): Promise<SavedSentence[]> {
+export async function fetchSentences(options?: string | FetchSentencesOptions): Promise<SavedSentence[]> {
   const d = await getDb();
+  const search = typeof options === "string" ? options : options?.search;
+  const transformType = typeof options === "string" ? "all" : options?.transformType ?? "all";
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+
   if (search && search.trim()) {
-    return d.select<SavedSentence[]>(
-      "SELECT * FROM saved_sentences WHERE original_text LIKE $1 ORDER BY created_at DESC",
-      [`%${search}%`]
+    const index = params.length + 1;
+    params.push(`%${search.trim()}%`);
+    clauses.push(
+      `(s.original_text LIKE $${index}
+        OR s.source_app LIKE $${index}
+        OR s.source_url LIKE $${index}
+        OR EXISTS (
+          SELECT 1 FROM sentence_transforms t_search
+          WHERE t_search.sentence_id = s.id
+            AND (
+              t_search.input_text LIKE $${index}
+              OR t_search.output_text LIKE $${index}
+              OR t_search.transform_type LIKE $${index}
+              OR t_search.model_name LIKE $${index}
+            )
+        ))`
     );
   }
+
+  if (transformType !== "all") {
+    const index = params.length + 1;
+    params.push(transformType);
+    clauses.push(
+      `EXISTS (
+        SELECT 1 FROM sentence_transforms t_filter
+        WHERE t_filter.sentence_id = s.id
+          AND t_filter.transform_type = $${index}
+      )`
+    );
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return d.select<SavedSentence[]>(
-    "SELECT * FROM saved_sentences ORDER BY created_at DESC",
-    []
+    `SELECT DISTINCT s.*
+     FROM saved_sentences s
+     ${where}
+     ORDER BY s.updated_at DESC, s.created_at DESC`,
+    params
   );
 }
 
