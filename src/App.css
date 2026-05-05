@@ -128,13 +128,62 @@ input, textarea {
   background: var(--surface-muted);
 }
 
+.settings-layout {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 940px);
+  gap: 22px;
+  align-items: start;
+  max-width: 1130px;
+  margin: 0 auto;
+}
+
+.settings-main {
+  min-width: 0;
+}
+
+.settings-nav {
+  position: sticky;
+  top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--neutral-border-soft);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.76);
+  box-shadow: 0 1px 2px rgba(15, 15, 15, 0.025);
+}
+
+.settings-nav-brand {
+  padding: 5px 7px 8px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settings-nav a {
+  padding: 7px;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.settings-nav a:hover,
+.settings-nav a:focus-visible {
+  background: rgba(21, 21, 21, 0.045);
+  color: var(--fg);
+}
+
 .settings-hero {
   display: flex;
   justify-content: space-between;
   gap: 24px;
   align-items: flex-end;
-  max-width: 940px;
-  margin: 0 auto 16px;
+  margin: 0 0 16px;
 }
 
 .settings-kicker {
@@ -156,6 +205,7 @@ input, textarea {
 .settings-hero p,
 .settings-panel-head p,
 .settings-readiness-head p,
+.settings-preference-group p,
 .settings-help-copy,
 .settings-status-detail,
 .settings-matrix-detail,
@@ -166,15 +216,22 @@ input, textarea {
   line-height: 1.55;
 }
 
+.settings-hero-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .settings-readiness-card,
 .settings-panel {
   background: var(--surface-card);
   border: 1px solid var(--neutral-border-soft);
   border-radius: 8px;
   box-shadow: 0 1px 2px rgba(15, 15, 15, 0.035), 0 10px 26px rgba(15, 15, 15, 0.045);
-  max-width: 940px;
   padding: 16px 16px 18px;
-  margin: 0 auto 14px;
+  margin: 0 0 14px;
 }
 
 .settings-readiness-head,
@@ -258,6 +315,19 @@ input, textarea {
 .settings-diagnostics h3 {
   font-size: 13px;
   margin-bottom: 10px;
+}
+
+.settings-subsection {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--neutral-border-soft);
+}
+
+.settings-subsection h3,
+.settings-preference-group h3 {
+  color: var(--fg);
+  font-size: 13px;
+  margin-bottom: 4px;
 }
 
 .settings-diagnostic-list {
@@ -501,6 +571,34 @@ input, textarea {
 .form-group select:focus,
 .form-group textarea:focus {
   border-color: var(--accent);
+}
+
+.settings-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.settings-form-grid .form-group {
+  margin-bottom: 0;
+}
+
+.settings-form-grid .form-group:first-child {
+  grid-column: 1 / -1;
+}
+
+.settings-preference-group {
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+  margin-top: 14px;
+  border-top: 1px solid var(--neutral-border-soft);
+}
+
+.settings-panel-head + .settings-preference-group {
+  padding-top: 0;
+  margin-top: 0;
+  border-top: none;
 }
 
 .settings-choice-row {
@@ -866,7 +964,23 @@ input, textarea {
     padding: 18px 16px 24px;
   }
 
+  .settings-layout {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .settings-nav {
+    position: static;
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .settings-nav-brand {
+    display: none;
+  }
+
   .settings-hero,
+  .settings-hero-actions,
   .settings-readiness-head,
   .settings-panel-head,
   .settings-actions-row,
@@ -878,6 +992,7 @@ input, textarea {
     align-items: flex-start;
   }
 
+  .settings-form-grid,
   .settings-choice-row {
     grid-template-columns: 1fr;
   }

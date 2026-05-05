@@ -352,225 +352,244 @@ export default function SettingsPage() {
 
   return (
     <div className="settings-shell">
-      <div className="settings-hero">
-        <div>
-          <div className="settings-kicker">Inkling</div>
-          <h1>Setup and support</h1>
-          <p>
-            Inkling works best when it can both read a live selection and write back into editable
-            text fields. This screen shows whether the runtime is ready, how Replace behaves, and
-            which surfaces are intentionally copy-only.
-          </p>
-        </div>
-        <button className="settings-secondary-btn" onClick={() => void refreshStatus()}>
-          Refresh status
-        </button>
+      <div className="settings-layout">
+        <aside className="settings-nav" aria-label="Settings sections">
+          <div className="settings-nav-brand">Inkling</div>
+          <a href="#runtime">Runtime</a>
+          <a href="#ai-provider">AI Provider</a>
+          <a href="#actions">Actions</a>
+          <a href="#compatibility">Compatibility</a>
+        </aside>
+
+        <main className="settings-main">
+          <div className="settings-hero">
+            <div>
+              <div className="settings-kicker">Settings</div>
+              <h1>Setup and preferences</h1>
+              <p>
+                Configure the AI provider, tune action behavior, and verify whether the macOS
+                runtime is ready for selection capture and Replace.
+              </p>
+            </div>
+            <div className="settings-hero-actions">
+              <button className="settings-secondary-btn" onClick={() => void refreshStatus()}>
+                Refresh status
+              </button>
+              <button onClick={saveSettings} className="settings-primary-btn" disabled={saving}>
+                {saving ? "Saving..." : saved ? "Saved" : "Save settings"}
+              </button>
+            </div>
+          </div>
+
+          <section id="runtime" className="settings-readiness-card">
+            <div className="settings-readiness-head">
+              <div>
+                <h2>Runtime</h2>
+                <p>{readyCount} of {readinessItems.length} requirements are ready.</p>
+              </div>
+              <div className={`settings-pill ${readyCount === readinessItems.length ? "is-ready" : "is-warning"}`}>
+                {readyCount === readinessItems.length ? "Ready to test" : "Action needed"}
+              </div>
+            </div>
+
+            <div className="settings-status-grid">
+              {readinessItems.map((item) => (
+                <div key={item.label} className="settings-status-card">
+                  <div className={`settings-status-dot ${item.ok ? "is-ok" : "is-bad"}`} />
+                  <div>
+                    <div className="settings-status-title">{item.label}</div>
+                    <div className="settings-status-detail">{item.detail}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="settings-runtime-actions">
+              <button className="settings-secondary-btn" onClick={() => void openAccessibilitySettings()}>
+                Open Accessibility
+              </button>
+              <button
+                className="settings-secondary-btn"
+                disabled={!status?.sidecarAvailable || !!status?.sidecarExecutable}
+                onClick={() => void repairBridgePermissions()}
+              >
+                Repair bridge permission
+              </button>
+            </div>
+            {runtimeActionStatus && <div className="settings-action-note">{runtimeActionStatus}</div>}
+
+            <div className="settings-diagnostics">
+              <h3>Diagnostics</h3>
+              <div className="settings-diagnostic-list">
+                {diagnostics.map((item) => (
+                  <div key={item.label} className="settings-diagnostic-row">
+                    <span className="settings-diagnostic-label">{item.label}</span>
+                    <span className={item.mono ? "settings-diagnostic-value settings-mono" : "settings-diagnostic-value"}>
+                      {item.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div className="settings-selection-grid">
+                {renderSelectionCard("Current selection", status?.currentSelection)}
+                {renderSelectionCard("Last captured", status?.lastSelection)}
+              </div>
+            </div>
+
+            {statusError && <div className="settings-inline-error">Runtime status failed: {statusError}</div>}
+          </section>
+
+          <section id="ai-provider" className="settings-panel">
+            <div className="settings-panel-head">
+              <div>
+                <h2>AI Provider</h2>
+                <p>Credentials and model used by Ask, Translate, Polish, Grammar, Explain, and Summarize.</p>
+              </div>
+              {status && (
+                <div className="settings-runtime-summary">
+                  <span>Host: {status.apiHost}</span>
+                  <span>Model: {status.model}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="settings-form-grid">
+              <div className="form-group">
+                <label>API Key</label>
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="sk-..."
+                />
+              </div>
+
+              <div className="form-group">
+                <label>API Host</label>
+                <input
+                  type="text"
+                  value={apiHost}
+                  onChange={(e) => setApiHost(e.target.value)}
+                  placeholder="api.moonshot.cn"
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Model</label>
+                <select value={model} onChange={(e) => setModel(e.target.value)}>
+                  {MODELS.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="settings-field-note">
+              Missing API keys are surfaced inside the floating bar before any AI request is sent.
+            </div>
+          </section>
+
+          <section id="actions" className="settings-panel">
+            <div className="settings-panel-head">
+              <div>
+                <h2>Action Preferences</h2>
+                <p>Defaults used by the Dock actions. Changes apply the next time an action runs.</p>
+              </div>
+            </div>
+
+            <div className="settings-preference-group">
+              <div>
+                <h3>Translate target</h3>
+                <p>Keep one Translate button in the Dock while controlling the output language here.</p>
+              </div>
+              <div className="settings-choice-row" role="group" aria-label="Translate target">
+                {TRANSLATE_MODES.map((mode) => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    className={`settings-choice ${translateMode === mode.id ? "is-active" : ""}`}
+                    aria-pressed={translateMode === mode.id}
+                    onClick={() => setTranslateMode(mode.id)}
+                  >
+                    <span>{mode.label}</span>
+                    <small>{mode.detail}</small>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="settings-preference-group">
+              <div>
+                <h3>Polish style</h3>
+                <p>Choose a default tone, or use Custom to inject your own instruction.</p>
+              </div>
+              <div className="settings-choice-row settings-choice-row-polish" role="group" aria-label="Polish style">
+                {POLISH_STYLES.map((style) => (
+                  <button
+                    key={style.id}
+                    type="button"
+                    className={`settings-choice ${polishStyle === style.id ? "is-active" : ""}`}
+                    aria-pressed={polishStyle === style.id}
+                    onClick={() => setPolishStyle(style.id)}
+                  >
+                    <span>{style.label}</span>
+                    <small>{style.detail}</small>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className={`form-group settings-custom-polish ${polishStyle === "custom" ? "is-active" : ""}`}>
+              <label>Custom polish instruction</label>
+              <textarea
+                value={polishCustomInstruction}
+                onChange={(e) => setPolishCustomInstruction(e.target.value)}
+                placeholder="Example: Keep my tone casual, but make the wording clearer and more confident."
+                rows={3}
+              />
+              <div className="settings-field-note">
+                Used when Polish style is Custom. If Custom is selected but this is empty, Inkling falls back to Balanced.
+              </div>
+            </div>
+          </section>
+
+          <section id="compatibility" className="settings-panel">
+            <div className="settings-panel-head">
+              <div>
+                <h2>Compatibility</h2>
+                <p>What Replace can do depends on the active macOS app and whether the surface is editable.</p>
+              </div>
+            </div>
+
+            <div className="settings-matrix">
+              {SUPPORT_MATRIX.map((item) => (
+                <div key={item.app} className="settings-matrix-row">
+                  <div>
+                    <div className="settings-matrix-app">{item.app}</div>
+                    <div className="settings-matrix-detail">{item.detail}</div>
+                  </div>
+                  <div className={`settings-pill ${item.mode === "Replace" ? "is-ready" : "is-muted"}`}>
+                    {item.mode}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="settings-subsection">
+              <h3>Operator notes</h3>
+              <div className="settings-tips">
+                {QUICK_TIPS.map((tip) => (
+                  <div key={tip} className="settings-tip">
+                    {tip}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        </main>
       </div>
-
-      <section className="settings-readiness-card">
-        <div className="settings-readiness-head">
-          <div>
-            <h2>Readiness</h2>
-            <p>{readyCount} of {readinessItems.length} requirements are ready.</p>
-          </div>
-          <div className={`settings-pill ${readyCount === readinessItems.length ? "is-ready" : "is-warning"}`}>
-            {readyCount === readinessItems.length ? "Ready to test" : "Action needed"}
-          </div>
-        </div>
-
-        <div className="settings-status-grid">
-          {readinessItems.map((item) => (
-            <div key={item.label} className="settings-status-card">
-              <div className={`settings-status-dot ${item.ok ? "is-ok" : "is-bad"}`} />
-              <div>
-                <div className="settings-status-title">{item.label}</div>
-                <div className="settings-status-detail">{item.detail}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="settings-runtime-actions">
-          <button className="settings-secondary-btn" onClick={() => void openAccessibilitySettings()}>
-            Open Accessibility
-          </button>
-          <button
-            className="settings-secondary-btn"
-            disabled={!status?.sidecarAvailable || !!status?.sidecarExecutable}
-            onClick={() => void repairBridgePermissions()}
-          >
-            Repair bridge permission
-          </button>
-        </div>
-        {runtimeActionStatus && <div className="settings-action-note">{runtimeActionStatus}</div>}
-
-        <div className="settings-diagnostics">
-          <h3>Runtime diagnostics</h3>
-          <div className="settings-diagnostic-list">
-            {diagnostics.map((item) => (
-              <div key={item.label} className="settings-diagnostic-row">
-                <span className="settings-diagnostic-label">{item.label}</span>
-                <span className={item.mono ? "settings-diagnostic-value settings-mono" : "settings-diagnostic-value"}>
-                  {item.value}
-                </span>
-              </div>
-            ))}
-          </div>
-          <div className="settings-selection-grid">
-            {renderSelectionCard("Current selection", status?.currentSelection)}
-            {renderSelectionCard("Last captured", status?.lastSelection)}
-          </div>
-        </div>
-
-        {statusError && <div className="settings-inline-error">Runtime status failed: {statusError}</div>}
-      </section>
-
-      <section className="settings-panel">
-        <div className="settings-panel-head">
-          <div>
-            <h2>Kimi configuration</h2>
-            <p>These values control AI rewrite requests from the floating action bar.</p>
-          </div>
-          {status && (
-            <div className="settings-runtime-summary">
-              <span>Host: {status.apiHost}</span>
-              <span>Model: {status.model}</span>
-            </div>
-          )}
-        </div>
-
-        <div className="form-group">
-          <label>API Key</label>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-..."
-          />
-        </div>
-
-        <div className="form-group">
-          <label>API Host</label>
-          <input
-            type="text"
-            value={apiHost}
-            onChange={(e) => setApiHost(e.target.value)}
-            placeholder="api.moonshot.cn"
-          />
-        </div>
-
-        <div className="form-group">
-          <label>Model</label>
-          <select value={model} onChange={(e) => setModel(e.target.value)}>
-            {MODELS.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="form-group">
-          <label>Translate target</label>
-          <div className="settings-choice-row" role="group" aria-label="Translate target">
-            {TRANSLATE_MODES.map((mode) => (
-              <button
-                key={mode.id}
-                type="button"
-                className={`settings-choice ${translateMode === mode.id ? "is-active" : ""}`}
-                aria-pressed={translateMode === mode.id}
-                onClick={() => setTranslateMode(mode.id)}
-              >
-                <span>{mode.label}</span>
-                <small>{mode.detail}</small>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="form-group">
-          <label>Polish style</label>
-          <div className="settings-choice-row settings-choice-row-polish" role="group" aria-label="Polish style">
-            {POLISH_STYLES.map((style) => (
-              <button
-                key={style.id}
-                type="button"
-                className={`settings-choice ${polishStyle === style.id ? "is-active" : ""}`}
-                aria-pressed={polishStyle === style.id}
-                onClick={() => setPolishStyle(style.id)}
-              >
-                <span>{style.label}</span>
-                <small>{style.detail}</small>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className={`form-group settings-custom-polish ${polishStyle === "custom" ? "is-active" : ""}`}>
-          <label>Custom polish instruction</label>
-          <textarea
-            value={polishCustomInstruction}
-            onChange={(e) => setPolishCustomInstruction(e.target.value)}
-            placeholder="Example: Keep my tone casual, but make the wording clearer and more confident."
-            rows={3}
-          />
-          <div className="settings-field-note">
-            Used when Polish style is Custom. If Custom is selected but this is empty, Inkling falls back to Balanced.
-          </div>
-        </div>
-
-        <div className="settings-actions-row">
-          <button
-            onClick={saveSettings}
-            className="settings-primary-btn"
-            disabled={saving}
-          >
-            {saving ? "Saving..." : saved ? "Saved" : "Save configuration"}
-          </button>
-          <div className="settings-help-copy">
-            Missing key is now surfaced directly inside the floating bar before any API call is made.
-          </div>
-        </div>
-      </section>
-
-      <section className="settings-panel">
-        <div className="settings-panel-head">
-          <div>
-            <h2>Support matrix</h2>
-            <p>Use this to set expectations before testing a new app or surface.</p>
-          </div>
-        </div>
-
-        <div className="settings-matrix">
-          {SUPPORT_MATRIX.map((item) => (
-            <div key={item.app} className="settings-matrix-row">
-              <div>
-                <div className="settings-matrix-app">{item.app}</div>
-                <div className="settings-matrix-detail">{item.detail}</div>
-              </div>
-              <div className={`settings-pill ${item.mode === "Replace" ? "is-ready" : "is-muted"}`}>
-                {item.mode}
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="settings-panel">
-        <div className="settings-panel-head">
-          <div>
-            <h2>Operator notes</h2>
-            <p>Small rules that make the product feel predictable instead of magical.</p>
-          </div>
-        </div>
-        <div className="settings-tips">
-          {QUICK_TIPS.map((tip) => (
-            <div key={tip} className="settings-tip">
-              {tip}
-            </div>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }
