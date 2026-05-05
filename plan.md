@@ -1,10 +1,10 @@
-# Seleany Pro Tauri v2 Clean-Room Plan
+# Inkling Tauri v2 Clean-Room Plan
 
 Last updated: 2026-04-06
 
 ## 1. Goal
 
-Build a new macOS app from scratch in `/Volumes/KINGSTON/work/research/seleany_pro` with:
+Build a new macOS app from scratch with:
 
 - Tauri v2
 - React + TypeScript + Vite
@@ -21,7 +21,7 @@ Phase 1 product scope stays intentionally narrow:
 Primary UX:
 
 - User selects text in any macOS app.
-- Seleany Pro shows a tiny floating action bar near the selection.
+- Inkling shows a tiny floating action bar near the selection.
 - AI actions open a result window first, then let the user replace/insert/copy.
 - `Save Sentence` stores the original text plus source metadata in a searchable library.
 
@@ -144,8 +144,8 @@ We are building a narrow product:
 
 Fresh naming:
 
-- app name: `Seleany Pro`
-- internal namespace prefix: `seleany_pro`
+- app name: `Inkling`
+- internal namespace prefix: `inkling`
 - avoid legacy action ids and config names
 
 Fresh data model:

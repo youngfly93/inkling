@@ -1,4 +1,5 @@
 mod commands;
+mod identity;
 mod logging;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -62,10 +63,12 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(
             tauri_plugin_sql::Builder::default()
-                .add_migrations("sqlite:seleany.db", commands::library::migrations())
+                .add_migrations(identity::DATABASE_URL, commands::library::migrations())
                 .build(),
         )
         .setup(|app| {
+            identity::migrate_legacy_identity(app.handle());
+
             #[cfg(target_os = "macos")]
             app.set_activation_policy(ActivationPolicy::Accessory);
 

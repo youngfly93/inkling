@@ -1,6 +1,6 @@
 # Clean-Room Working Rules
 
-This file is the operating contract for everyone working in `/Volumes/KINGSTON/work/research/seleany_pro`.
+This file is the operating contract for everyone working on Inkling.
 
 ## 1. Project intent
 

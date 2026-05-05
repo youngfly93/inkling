@@ -13,6 +13,14 @@ macOS selection assistant for translation, rewriting, explanation, and lightweig
 - Rust backend, SQLite storage
 - Swift native bridge for macOS text selection (Accessibility API)
 
+## App Identity
+
+- Product name: `Inkling`
+- Bundle identifier: `com.youngfly93.inkling`
+- Local database: `inkling.db`
+
+On first launch after the identity change, Inkling copies existing settings and library data from the legacy `com.seleany.pro` app directory if the new app directory is still empty.
+
 ## Build
 
 ```bash

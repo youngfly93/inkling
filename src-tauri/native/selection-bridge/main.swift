@@ -8,7 +8,7 @@ import AppKit
 import Foundation
 import ApplicationServices
 
-let ownBundleID = "com.seleany.pro"
+let ownBundleID = "com.youngfly93.inkling"
 
 struct SelectionSnapshot: Encodable {
     let text: String
