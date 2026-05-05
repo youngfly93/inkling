@@ -1,5 +1,6 @@
 use serde::Serialize;
 use serde_json::Value;
+use std::fs;
 use std::path::Path;
 use std::process::Command as StdCommand;
 use tauri_plugin_store::StoreExt;
@@ -42,6 +43,23 @@ fn is_executable(path: &Path) -> bool {
     path.is_file()
 }
 
+#[cfg(unix)]
+fn make_executable(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let metadata = path
+        .metadata()
+        .map_err(|e| format!("Bridge metadata error: {}", e))?;
+    let mut permissions = metadata.permissions();
+    permissions.set_mode(permissions.mode() | 0o755);
+    fs::set_permissions(path, permissions).map_err(|e| format!("Bridge chmod error: {}", e))
+}
+
+#[cfg(not(unix))]
+fn make_executable(_path: &Path) -> Result<(), String> {
+    Err("Bridge permission repair is only available on Unix platforms.".to_string())
+}
+
 #[tauri::command]
 pub async fn get_setting(app: tauri::AppHandle, key: String) -> Result<Value, String> {
     let store = app
@@ -61,6 +79,36 @@ pub async fn set_setting(app: tauri::AppHandle, key: String, value: Value) -> Re
     store.save().map_err(|e| format!("Save error: {}", e))?;
 
     Ok(())
+}
+
+#[tauri::command]
+pub fn open_accessibility_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        StdCommand::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            .spawn()
+            .map_err(|e| format!("Failed to open Accessibility settings: {}", e))?;
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("Accessibility settings shortcut is only available on macOS.".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn repair_bridge_permissions(app: tauri::AppHandle) -> Result<(), String> {
+    let bridge_path = super::selection::resolve_bridge_path(&app);
+    if !bridge_path.exists() {
+        return Err(format!(
+            "Bridge binary does not exist at {}",
+            bridge_path.display()
+        ));
+    }
+
+    make_executable(&bridge_path)
 }
 
 #[tauri::command]

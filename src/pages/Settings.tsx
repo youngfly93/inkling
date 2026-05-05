@@ -65,6 +65,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<RuntimeStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [runtimeActionStatus, setRuntimeActionStatus] = useState<string | null>(null);
 
   useEffect(() => {
     void refreshAll();
@@ -127,6 +128,27 @@ export default function SettingsPage() {
     }
   }
 
+  async function openAccessibilitySettings() {
+    try {
+      await invoke("open_accessibility_settings");
+      setRuntimeActionStatus("Opened macOS Accessibility settings.");
+    } catch (e) {
+      console.error("Failed to open Accessibility settings:", e);
+      setRuntimeActionStatus(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function repairBridgePermissions() {
+    try {
+      await invoke("repair_bridge_permissions");
+      await refreshStatus();
+      setRuntimeActionStatus("Bridge permission repaired.");
+    } catch (e) {
+      console.error("Failed to repair bridge permissions:", e);
+      setRuntimeActionStatus(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   function formatSelectionSummary(selection: SelectionDiagnostic | null | undefined): string {
     if (!selection) {
       return "No live selection";
@@ -147,6 +169,44 @@ export default function SettingsPage() {
       minute: "2-digit",
       second: "2-digit",
     });
+  }
+
+  function selectionSource(selection: SelectionDiagnostic | null | undefined): string {
+    return selection?.appName || selection?.app || "None";
+  }
+
+  function renderSelectionCard(title: string, selection: SelectionDiagnostic | null | undefined) {
+    return (
+      <div className="settings-selection-card">
+        <div className="settings-selection-title">{title}</div>
+        {selection ? (
+          <div className="settings-selection-facts">
+            <div>
+              <span>Source</span>
+              <strong>{selectionSource(selection)}</strong>
+            </div>
+            <div>
+              <span>Length</span>
+              <strong>{selection.textLength} chars</strong>
+            </div>
+            <div>
+              <span>Surface</span>
+              <strong>{selection.editable ? "Editable" : "Read-only"}</strong>
+            </div>
+            <div>
+              <span>Method</span>
+              <strong>{selection.method}</strong>
+            </div>
+            <div>
+              <span>Captured</span>
+              <strong>{formatStatusTime(selection.capturedAtMs)}</strong>
+            </div>
+          </div>
+        ) : (
+          <div className="settings-selection-empty">No selection recorded.</div>
+        )}
+      </div>
+    );
   }
 
   const readinessItems = [
@@ -255,6 +315,20 @@ export default function SettingsPage() {
           ))}
         </div>
 
+        <div className="settings-runtime-actions">
+          <button className="settings-secondary-btn" onClick={() => void openAccessibilitySettings()}>
+            Open Accessibility
+          </button>
+          <button
+            className="settings-secondary-btn"
+            disabled={!status?.sidecarAvailable || !!status?.sidecarExecutable}
+            onClick={() => void repairBridgePermissions()}
+          >
+            Repair bridge permission
+          </button>
+        </div>
+        {runtimeActionStatus && <div className="settings-action-note">{runtimeActionStatus}</div>}
+
         <div className="settings-diagnostics">
           <h3>Runtime diagnostics</h3>
           <div className="settings-diagnostic-list">
@@ -266,6 +340,10 @@ export default function SettingsPage() {
                 </span>
               </div>
             ))}
+          </div>
+          <div className="settings-selection-grid">
+            {renderSelectionCard("Current selection", status?.currentSelection)}
+            {renderSelectionCard("Last captured", status?.lastSelection)}
           </div>
         </div>
 

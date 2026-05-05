@@ -127,6 +127,8 @@ pub fn run() {
             commands::settings::get_setting,
             commands::settings::set_setting,
             commands::settings::get_runtime_status,
+            commands::settings::open_accessibility_settings,
+            commands::settings::repair_bridge_permissions,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
